@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Duo Watch",
+  "version": "1.0.0",
+  "description": "在你自己的浏览器里监控 iPhone Duo 门店取货库存，有货立刻报警。",
+  "permissions": ["notifications", "storage", "alarms", "tabs"],
+  "host_permissions": ["https://www.apple.com/*", "http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "icons": { "128": "icon.png" },
+  "action": { "default_title": "Duo Watch" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.apple.com/*shop/buy-iphone/iphone-duo*"],
+      "js": ["parse.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
