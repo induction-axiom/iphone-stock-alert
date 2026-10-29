@@ -13,8 +13,8 @@ A small panel sits on Apple's own buy page and checks nearby stores about every 
 
 ## Install
 
-1. Download this repo (**Code → Download ZIP**, then unzip)
-2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `extension` folder
+1. Download **[iphone-stock-alert.zip](https://github.com/induction-axiom/iphone-stock-alert/releases/latest/download/iphone-stock-alert.zip)** from the latest release and double-click it to unzip
+2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped `iphone-stock-alert` folder
 3. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
 4. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
 
@@ -61,4 +61,4 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 | "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[iPhone Stock Alert] raw response`. |
 | The voice test is silent | Turn the Mac's volume up and Mute off. |
 
-Developers: run tests with `node extension/test.js`.
+Developers: run tests with `node extension/test.js`; build the release zip with `scripts/package.sh`.
