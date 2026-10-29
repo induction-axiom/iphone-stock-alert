@@ -54,7 +54,6 @@ const STRINGS = {
     testResult: (list) => `Test sent: ${list}.`,
     chromeHelp: 'No notification? Allow Google Chrome in macOS System Settings → Notifications, and turn off Focus.',
     phoneHow: 'Install the free ntfy app, tap +, and subscribe to this topic:',
-    topicHint: 'Click the topic to edit it or paste your own. Anyone who knows it can read these alerts, so keep it long and random.',
     badTopic: 'Use 1–64 letters, numbers, - or _',
     newTopic: 'New',
     fine: 'Checks only while this tab is open and your Mac is awake. Closing the lid or quitting Chrome pauses it.',
@@ -115,7 +114,6 @@ const STRINGS = {
     testResult: (list) => `已发送测试：${list}。`,
     chromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知，并关掉专注模式。',
     phoneHow: '安装免费的 ntfy App，点 +，订阅这个主题：',
-    topicHint: '点主题名就能修改，或粘贴你自己的主题。知道主题名的人都能看到这些提醒，所以要够长、够随机。',
     badTopic: '只能用 1–64 个字母、数字、- 或 _',
     newTopic: '换一个',
     fine: '只在这个页面开着、Mac 醒着时检查。合上盖子或退出 Chrome 会暂停。',
@@ -321,6 +319,7 @@ root.innerHTML = `
   input:focus, select:focus { border-color: var(--blue); }
   .howto { padding: 0 0 8px; color: var(--muted); font-size: 11px; }
   .howto a { color: var(--blue); }
+  [data-v=badTopic] { margin-top: 4px; color: var(--amber); }
   .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 5px 5px 5px 8px; border-radius: 8px; background: var(--bg);
           border: 1px solid var(--line); cursor: text; }
   .code:hover { border-color: color-mix(in srgb, var(--fg) 25%, transparent); }
@@ -392,7 +391,7 @@ root.innerHTML = `
       <div class="howto" data-v="phoneHow" hidden>
         <span data-t="phoneHow"></span> <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a>
         <div class="code" data-a="focusTopic"><input class="topic" data-k="ntfyTopic" spellcheck="false" aria-label="ntfy topic"><button class="link" data-copy="topic" data-t="copy"></button><button class="link" data-a="newTopic" data-t="newTopic"></button></div>
-        <div data-v="topicHint"></div>
+        <div data-v="badTopic" data-t="badTopic" hidden></div>
       </div>
       <div class="srow">
         <span class="k" data-t="problems"></span><span class="v hintv" data-v="warnText"></span>
@@ -451,8 +450,7 @@ async function render() {
   $('[data-a=warn]').setAttribute('aria-pressed', String(c.warn));
   const topicInput = $('[data-k=ntfyTopic]');
   if (root.activeElement !== topicInput) topicInput.value = c.ntfyTopic || '';
-  $('[data-v=topicHint]').textContent = view.badTopic ? t('badTopic') : t('topicHint');
-  $('[data-v=topicHint]').style.color = view.badTopic ? 'var(--amber)' : '';
+  $('[data-v=badTopic]').hidden = !view.badTopic;
   $('[data-v=testNote]').hidden = !view.testNote;
   if (view.testNote) {
     const list = view.testNote.map(([k, ok]) => `${t('short')[k]} ${ok ? '✓' : '✗'}`).join(' · ');
