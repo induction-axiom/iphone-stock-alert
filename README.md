@@ -49,7 +49,7 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 | **Say it out loud** (on by default) | Your Mac's voice repeats "iPhone … is in stock!" until you click **Silence alarm** or the notification | Keep the volume up and Mute off |
 | **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel. It starts as a random UUID; you can paste your own or make a new one |
 
-**Problems** (on by default): if checks keep failing for 5 minutes, the Mac was asleep, or a watching tab was closed, you get one Chrome notification (and a phone push if that's on). It is never spoken out loud, and comes at most once an hour per tab, so a night of Apple rate limits won't keep you up. Turn it off in the panel to stay quiet.
+**Problems** (on by default): if checks keep failing for 5 minutes, the Mac was asleep, or a watching tab was closed, you're alerted once on the same alerts you picked for stock: the voice says it a single time instead of repeating, and it comes at most once an hour per tab. Turn it off in the panel to stay quiet, for example overnight.
 
 ## Keep it running
 

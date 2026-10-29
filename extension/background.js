@@ -89,16 +89,18 @@ function notifyChrome(title, message, tabId) {
   });
 }
 
-// Speaks the text with the Mac's own voice, over and over, until stopVoice() or VOICE_MAX_MS.
+// Speaks the text with the Mac's own voice, once or over and over until stopVoice() or VOICE_MAX_MS.
 let voiceUntil = 0;
+const ringing = () => Date.now() < voiceUntil;
 function speak(text, zh, repeat) {
   voiceUntil = repeat ? Date.now() + VOICE_MAX_MS : 0;
+  const spoken = text.replace(/\s*·\s*/g, ', ').replace(/"/g, ' inch');
   const once = () =>
-    chrome.tts.speak(text, {
+    chrome.tts.speak(spoken, {
       lang: zh ? 'zh-CN' : 'en-US',
       volume: 1,
       onEvent: (e) => {
-        if (e.type === 'end' && Date.now() < voiceUntil) setTimeout(() => Date.now() < voiceUntil && once(), 1200);
+        if (e.type === 'end' && ringing()) setTimeout(() => ringing() && once(), 1200);
       },
     });
   once();
@@ -133,47 +135,43 @@ async function alertFound(tabId, w, stores, model) {
     }
   }
   if (channels.voice) {
-    const spoken = model.replace(/\s*·\s*/g, ', ').replace(/"/g, ' inch');
-    speak(zh ? `${spoken} 有货了！快去下单！` : `${spoken} is in stock! Go buy it now!`, zh, true);
+    speak(zh ? `${model} 有货了！快去下单！` : `${model} is in stock! Go buy it now!`, zh, true);
   }
   if (channels.phone && topic) pushPhone(topic, title, message, url);
 }
 
-// Problem warnings (checks failing, a sleep gap, a closed tab) can be turned off per tab, never speak,
-// and come at most once an hour, so a night of Apple rate limits doesn't keep anyone up.
+// Problem warnings (checks failing, a sleep gap, a closed tab) go out on the same alerts the tab uses
+// for stock, but once: the voice says it a single time instead of repeating. They can be turned off per
+// tab and come at most once an hour.
 const warnsOn = (w) => !w || w.warn !== false;
 
-// Sent once when a tab's checks have been failing for a while, so a quiet panel isn't mistaken for "no stock".
-async function warnFailing(tabId, w, model) {
+async function warn(w, tabId, en, zhText) {
   if (!warnsOn(w)) return;
   const { zh, channels, topic } = await getPrefs(w);
-  const text = zh
-    ? `${model || 'iPhone'} 的库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。`
-    : `Stock checks for ${model || 'your iPhone'} haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.`;
+  const text = zh ? zhText : en;
   if (channels.chrome) notifyChrome(NAME, text, tabId);
+  if (channels.voice && !ringing()) speak(text, zh, false); // never cut off a ringing stock alarm
   if (channels.phone && topic) pushPhone(topic, NAME, text, '');
+}
+
+// Sent once when a tab's checks have been failing for a while, so a quiet panel isn't mistaken for "no stock".
+function warnFailing(tabId, w, model) {
+  return warn(w, tabId,
+    `Stock checks for ${model || 'your iPhone'} haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.`,
+    `${model || 'iPhone'} 的库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。`);
 }
 
 // Checks can't run while the Mac sleeps, so say how long they were paused once they're back.
-async function reportGap(w, minutes) {
-  if (!warnsOn(w)) return;
-  const model = w.model;
-  const { zh, channels, topic } = await getPrefs(w);
-  const text = zh
-    ? `${model || 'iPhone'} 的监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`
-    : `Watching ${model || 'your iPhone'} was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`;
-  if (channels.phone && topic) pushPhone(topic, NAME, text, '');
+function reportGap(tabId, w, minutes) {
+  return warn(w, tabId,
+    `Watching ${w.model || 'your iPhone'} was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`,
+    `${w.model || 'iPhone'} 的监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`);
 }
 
-async function reportTabClosed(w) {
-  if (!warnsOn(w)) return;
-  const model = w.model;
-  const { zh, channels, topic } = await getPrefs(w);
-  const text = zh
-    ? `已停止监控 ${model || 'iPhone'}：Apple 页面被关掉了。`
-    : `Stopped watching ${model || 'your iPhone'}: its Apple page was closed.`;
-  if (channels.chrome) notifyChrome(NAME, text);
-  if (channels.phone && topic) pushPhone(topic, NAME, text, '');
+function reportTabClosed(w) {
+  return warn(w, undefined,
+    `Stopped watching ${w.model || 'your iPhone'}: its Apple page was closed.`,
+    `已停止监控 ${w.model || 'iPhone'}：Apple 页面被关掉了。`);
 }
 
 async function testChannel(channel, lang) {
@@ -212,7 +210,7 @@ async function tick(tabId) {
   const mayWarn = () => now - lastWarnAt > WARN_EVERY_MS && (lastWarnAt = now);
   if (w.nextAt && now - w.nextAt > GAP_MS) {
     lastGap = { minutes: Math.round((now - w.nextAt) / 60_000), at: now };
-    if (mayWarn()) reportGap(w, lastGap.minutes);
+    if (mayWarn()) reportGap(tabId, w, lastGap.minutes);
   }
 
   let r;
