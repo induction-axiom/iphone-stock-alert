@@ -6,13 +6,9 @@ const prefix = regionPrefix(location.pathname);
 const family = familySlug(location.pathname);
 const familyLabel = family ? familyName(family) : 'iPhone';
 let models = [];
-const HELPER_CMD =
-  'curl -fsSL https://raw.githubusercontent.com/induction-axiom/iphone-stock-alert/main/helper/stock_alarm.py | python3 -';
-const DEFAULT_CHANNELS = { chrome: true, mac: false, phone: false };
-let audioCtx = null;
-let siren = null;
+const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 let lang = 'en';
-const view = { running: false, ringing: false, result: null, checkedAt: null, nextAt: null, helperOk: null, channels: DEFAULT_CHANNELS };
+const view = { running: false, ringing: false, result: null, checkedAt: null, nextAt: null };
 
 const STRINGS = {
   en: {
@@ -34,15 +30,12 @@ const STRINGS = {
     last: (t) => `Last ${t}`,
     never: 'Not checked yet',
     next: (n) => ` · next in ${n}s`,
-    helperOn: '● Connected',
-    helperOff: '○ Not running yet',
     alerts: 'Alerts',
     chChrome: 'Chrome notification',
     chChromeHint: 'Pops up and brings this tab to the front',
     chChromeHelp: "Didn't see it? In macOS System Settings → Notifications → Google Chrome, allow notifications (and turn off Focus).",
-    chMacSub: 'Needs one command in Terminal',
-    chMac: 'Loud alarm on this Mac',
-    chMacHint: 'Max volume, spoken alert, keeps going until you click. Paste this into Terminal and leave it open:',
+    chVoice: 'Say it out loud',
+    chVoiceSub: "Repeats until you stop it. Keep your Mac's volume up.",
     chPhone: 'Push to my phone',
     chPhoneSub: 'Free ntfy app, max priority',
     chPhoneHint: 'Install the free ntfy app, tap +, and subscribe to this topic:',
@@ -81,15 +74,12 @@ const STRINGS = {
     last: (t) => `上次 ${t}`,
     never: '还没查过',
     next: (n) => ` · ${n} 秒后再查`,
-    helperOn: '● 已连接',
-    helperOff: '○ 还没运行',
     alerts: '提醒方式',
     chChrome: 'Chrome 通知',
     chChromeHint: '弹出通知，并把这个页面切到最前面',
     chChromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知（并关掉专注模式）。',
-    chMacSub: '需要在终端运行一条命令',
-    chMac: 'Mac 大声报警',
-    chMacHint: '音量开到最大、语音循环播报，点了才停。把这条命令粘贴到终端运行，并保持窗口开着：',
+    chVoice: '语音播报',
+    chVoiceSub: '一直重复，直到你点停止。请把 Mac 音量调大。',
     chPhone: '推送到手机',
     chPhoneSub: '免费的 ntfy App，最高优先级',
     chPhoneHint: '安装免费的 ntfy App，点 +，订阅这个主题：',
@@ -117,7 +107,8 @@ const t = (key, ...args) => {
 
 async function getConfig() {
   const c = await chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang', 'channels', 'ntfyTopic']);
-  c.channels = { ...DEFAULT_CHANNELS, ...c.channels };
+  const saved = c.channels || {};
+  c.channels = Object.fromEntries(Object.entries(DEFAULT_CHANNELS).map(([k, on]) => [k, k in saved ? saved[k] : on]));
   return c;
 }
 
@@ -186,57 +177,25 @@ async function check() {
   }
 }
 
-// ---------- alarm inside the page (part of the Chrome channel) ----------
+// ---------- tab title flashing while an alarm rings ----------
 
-function unlockAudio() {
-  if (!audioCtx) audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-}
+const pageTitle = document.title;
+let flashTimer = null;
 
-function beepOnce() {
-  if (!audioCtx || audioCtx.state !== 'running') return;
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.frequency.value = 880;
-  g.gain.value = 0.3;
-  o.connect(g).connect(audioCtx.destination);
-  o.start();
-  o.stop(audioCtx.currentTime + 0.2);
-}
-
-function startSiren() {
-  if (siren) return;
+function startFlash() {
   view.ringing = true;
-  let n = 0;
-  const flash = setInterval(() => {
-    document.title = n++ % 2 ? t('flashA') : t('flashB');
-  }, 500);
-  const beep = () => {
-    // When the Mac alarm is on and connected it does the talking, so the page stays quiet.
-    const macTalks = view.channels.mac && view.helperOk;
-    if (!view.channels.chrome || macTalks || !audioCtx || audioCtx.state !== 'running') return;
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'square';
-    o.frequency.setValueAtTime(880, audioCtx.currentTime);
-    o.frequency.setValueAtTime(1320, audioCtx.currentTime + 0.25);
-    g.gain.value = 0.6;
-    o.connect(g).connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.5);
-  };
-  beep();
-  siren = { flash, beep: setInterval(beep, 700) };
+  if (!flashTimer) {
+    let n = 0;
+    flashTimer = setInterval(() => (document.title = n++ % 2 ? t('flashA') : t('flashB')), 500);
+  }
   render();
 }
 
-function stopSiren() {
+function stopFlash() {
   view.ringing = false;
-  if (siren) {
-    clearInterval(siren.flash);
-    clearInterval(siren.beep);
-    siren = null;
-  }
+  clearInterval(flashTimer);
+  flashTimer = null;
+  document.title = pageTitle;
   render();
 }
 
@@ -367,12 +326,8 @@ root.innerHTML = `
       </div>
       <div class="howto" data-v="chromeHelp" data-t="chChromeHelp" hidden></div>
       <div class="ch">
-        <button class="check" role="checkbox" data-ch="mac"><span class="tick"></span><span><span data-t="chMac"></span><small data-v="macStatus"></small></span></button>
-        <button class="chip" data-test="mac" data-t="test"></button>
-      </div>
-      <div class="howto" data-v="macHow" hidden>
-        <span data-t="chMacHint"></span>
-        <div class="code"><code data-v="macCmd"></code><button class="chip" data-copy="macCmd" data-t="copy"></button></div>
+        <button class="check" role="checkbox" data-ch="voice"><span class="tick"></span><span><span data-t="chVoice"></span><small data-t="chVoiceSub"></small></span></button>
+        <button class="chip" data-test="voice" data-t="test"></button>
       </div>
       <div class="ch">
         <button class="check" role="checkbox" data-ch="phone"><span class="tick"></span><span><span data-t="chPhone"></span><small data-t="chPhoneSub"></small></span></button>
@@ -430,13 +385,8 @@ async function render() {
   $('[data-v=times]').textContent =
     (view.checkedAt ? t('last', clock(view.checkedAt)) : t('never')) + (view.running && left != null ? t('next', left) : '');
 
-  view.channels = c.channels;
   for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).setAttribute('aria-checked', String(on));
-  $('[data-v=macStatus]').textContent = c.channels.mac ? (view.helperOk ? t('helperOn') : t('helperOff')) : t('chMacSub');
-  $('[data-v=macStatus]').style.color = c.channels.mac ? (view.helperOk ? 'var(--green)' : 'var(--amber)') : '';
   $('[data-v=chromeHelp]').hidden = !view.chromeTested;
-  $('[data-v=macHow]').hidden = !(c.channels.mac && !view.helperOk);
-  $('[data-v=macCmd]').textContent = HELPER_CMD;
   $('[data-v=phoneHow]').hidden = !c.channels.phone;
   $('[data-v=topic]').textContent = c.ntfyTopic || '';
 
@@ -484,17 +434,6 @@ async function initPanel() {
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
   render();
   setInterval(() => view.running && render(), 1000);
-  setInterval(refreshHelper, 5000);
-  refreshHelper();
-}
-
-async function refreshHelper() {
-  if (!view.channels.mac) return;
-  const ok = await chrome.runtime.sendMessage({ type: 'helper?' }).catch(() => null);
-  if (ok !== view.helperOk) {
-    view.helperOk = ok;
-    render();
-  }
 }
 
 const randomTopic = () =>
@@ -552,7 +491,6 @@ root.addEventListener('change', async (e) => {
 });
 
 root.addEventListener('click', async (e) => {
-  unlockAudio(); // any click on the panel counts as the user gesture Chrome needs for sound
   const langBtn = e.target.closest('[data-lang]');
   if (langBtn) {
     await chrome.storage.local.set({ lang: langBtn.dataset.lang });
@@ -566,7 +504,6 @@ root.addEventListener('click', async (e) => {
     const update = { channels: { ...c.channels, [ch]: on } };
     if (ch === 'phone' && on && !c.ntfyTopic) update.ntfyTopic = randomTopic();
     await chrome.storage.local.set(update);
-    if (ch === 'mac') refreshHelper();
     return render();
   }
   const testBtn = e.target.closest('[data-test]');
@@ -580,7 +517,6 @@ root.addEventListener('click', async (e) => {
       void card.offsetWidth;
       card.classList.add('flash');
       setTimeout(() => card.classList.remove('flash'), 3200);
-      beepOnce();
     }
     const ok = await chrome.runtime.sendMessage({ type: 'test', channel }).catch(() => false);
     testBtn.textContent = ok ? '✓' : '✗';
@@ -602,7 +538,7 @@ root.addEventListener('click', async (e) => {
     await chrome.storage.local.set({ running: view.running });
     chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop' });
   } else if (a === 'ack') {
-    stopSiren();
+    stopFlash();
     chrome.runtime.sendMessage({ type: 'ack' });
   } else if (a === 'collapse') {
     const c = await getConfig();
@@ -617,18 +553,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       view.result = r;
       view.checkedAt = Date.now();
       render();
-      // background.js and the Mac helper get the error as text in the current language
-      reply(r.ok ? r : { ...r, error: t(...r.err) });
+      reply(r);
     });
     return true; // async reply
   }
   if (msg.type === 'status') {
     Object.assign(view, { running: msg.running, nextAt: msg.nextAt });
-    if (msg.helperOk != null) view.helperOk = msg.helperOk;
     render();
   }
-  if (msg.type === 'found') startSiren();
-  if (msg.type === 'ack') stopSiren();
+  if (msg.type === 'found') startFlash();
+  if (msg.type === 'ack') stopFlash();
   if (msg.type === 'reload') location.reload();
 });
 

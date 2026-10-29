@@ -1,6 +1,5 @@
 // Drives the polling loop and sends alerts. Timers live here rather than in the page because
 // Chrome throttles timers in background tabs to once a minute; messages to the tab are not throttled.
-const HELPER = 'http://127.0.0.1:8765';
 const NTFY = 'https://ntfy.sh/';
 const BASE_MS = 10_000;
 const JITTER_MS = 2_000;
@@ -9,16 +8,20 @@ const RELOAD_AFTER_FAILS = 3;
 const MIN_RELOAD_GAP_MS = 5 * 60_000;
 const HEALTHY_RELOAD_MS = 30 * 60_000; // refresh Apple's cookies now and then
 const TAB_TIMEOUT_MS = 20_000;
-const DEFAULT_CHANNELS = { chrome: true, mac: false, phone: false };
+const FAILING_WARN_MS = 5 * 60_000;
+const VOICE_MAX_MS = 15 * 60_000;
+const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 
 let timer = null;
 
 const getState = () =>
-  chrome.storage.local.get(['running', 'tabId', 'fails', 'lastReloadAt', 'alerted']);
+  chrome.storage.local.get(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted']);
 
 async function getPrefs() {
   const p = await chrome.storage.local.get(['lang', 'channels', 'ntfyTopic']);
-  return { zh: p.lang === 'zh', channels: { ...DEFAULT_CHANNELS, ...p.channels }, topic: p.ntfyTopic };
+  const saved = p.channels || {};
+  const channels = Object.fromEntries(Object.entries(DEFAULT_CHANNELS).map(([k, on]) => [k, k in saved ? saved[k] : on]));
+  return { zh: p.lang === 'zh', channels, topic: p.ntfyTopic };
 }
 
 function schedule(ms) {
@@ -33,26 +36,6 @@ function nextDelay(fails) {
 
 // ---------- alert channels ----------
 
-// Every helper call carries the panel's language, so its voice and dialogs match.
-async function helper(path, body) {
-  const { zh } = await getPrefs();
-  return fetch(HELPER + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Stock-Alert': '1' },
-    body: JSON.stringify({ ...body, lang: zh ? 'zh' : 'en' }),
-  })
-    .then((r) => r.ok)
-    .catch(() => false);
-}
-
-const helperAlive = () => fetch(HELPER + '/status').then((r) => r.ok).catch(() => false);
-
-// Only pings the helper when the Mac alarm is on, so its watchdog stays quiet otherwise.
-async function pingHelper(body) {
-  const { channels } = await getPrefs();
-  return channels.mac ? helper('/ping', body) : null;
-}
-
 function notifyChrome(title, message) {
   chrome.notifications.create('alert-' + Date.now(), {
     type: 'basic',
@@ -62,6 +45,26 @@ function notifyChrome(title, message) {
     priority: 2,
     requireInteraction: true,
   });
+}
+
+// Speaks the text with the Mac's own voice, over and over, until stopVoice() or VOICE_MAX_MS.
+let voiceUntil = 0;
+function speak(text, zh, repeat) {
+  voiceUntil = repeat ? Date.now() + VOICE_MAX_MS : 0;
+  const once = () =>
+    chrome.tts.speak(text, {
+      lang: zh ? 'zh-CN' : 'en-US',
+      volume: 1,
+      onEvent: (e) => {
+        if (e.type === 'end' && Date.now() < voiceUntil) setTimeout(() => Date.now() < voiceUntil && once(), 1200);
+      },
+    });
+  once();
+}
+
+function stopVoice() {
+  voiceUntil = 0;
+  chrome.tts.stop();
 }
 
 function pushPhone(topic, title, message, url) {
@@ -79,7 +82,7 @@ async function alertFound(stores, tabId, model) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab ? tab.url : '';
 
-  chrome.tabs.sendMessage(tabId, { type: 'found' }).catch(() => {}); // panel flashes either way
+  chrome.tabs.sendMessage(tabId, { type: 'found' }).catch(() => {}); // the panel flashes either way
   if (channels.chrome) {
     notifyChrome(title, message);
     if (tab) {
@@ -87,8 +90,21 @@ async function alertFound(stores, tabId, model) {
       await chrome.tabs.update(tabId, { active: true }).catch(() => {});
     }
   }
-  if (channels.mac) helper('/alert', { title, model, message, url });
+  if (channels.voice) {
+    const spoken = model.replace(/\s*·\s*/g, ', ').replace(/"/g, ' inch');
+    speak(zh ? `${spoken} 有货了！快去下单！` : `${spoken} is in stock! Go buy it now!`, zh, true);
+  }
   if (channels.phone && topic) pushPhone(topic, title, message, url);
+}
+
+// Said once when checks have been failing for a while, so a silent panel isn't mistaken for "no stock".
+async function warnFailing() {
+  const { zh, channels } = await getPrefs();
+  const text = zh
+    ? '库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。'
+    : "Stock checks haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.";
+  if (channels.chrome) notifyChrome('iPhone Stock Alert', text);
+  if (channels.voice) speak(text, zh, false);
 }
 
 async function testChannel(channel) {
@@ -99,17 +115,20 @@ async function testChannel(channel) {
     notifyChrome(title, message);
     return new Promise((done) => chrome.notifications.getPermissionLevel((level) => done(level === 'granted')));
   }
-  if (channel === 'mac') return helper('/alert', { title, model: 'iPhone', message, url: '' });
+  if (channel === 'voice') {
+    speak(message, zh, false);
+    return true;
+  }
   if (channel === 'phone') return topic ? pushPhone(topic, title, message, '') : false;
   return false;
 }
 
 // ---------- polling ----------
 
-// Tells the panel when the next check is and whether the Mac helper answered.
-function pushStatus(tabId, running, nextAt, helperOk) {
+// Tells the panel when the next check is.
+function pushStatus(tabId, running, nextAt) {
   if (tabId == null) return;
-  chrome.tabs.sendMessage(tabId, { type: 'status', running, nextAt, helperOk }).catch(() => {});
+  chrome.tabs.sendMessage(tabId, { type: 'status', running, nextAt }).catch(() => {});
 }
 
 function askTab(tabId) {
@@ -128,6 +147,7 @@ async function tick() {
   timer = null;
   const s = await getState();
   if (!s.running) return;
+  chrome.power.requestKeepAwake('system'); // the screen may sleep, the Mac may not
   if (s.tabId == null) {
     badge('?', '#888');
     return; // waits for a 'hello' from an open iPhone buy page
@@ -137,25 +157,29 @@ async function tick() {
   try {
     r = await askTab(s.tabId);
   } catch (e) {
-    r = { ok: false, error: e.message, dead: true };
+    r = { ok: false, dead: true };
   }
   const now = Date.now();
   let fails = s.fails || 0;
-  let helperOk;
+  let failingSince = s.failingSince || null;
 
   if (r && r.ok) {
     fails = 0;
+    failingSince = null;
     const found = r.stores.filter((x) => x.available);
     const fresh = found.filter((x) => !(s.alerted || []).includes(x.id));
     await chrome.storage.local.set({ alerted: found.map((x) => x.id) });
-    helperOk = await pingHelper({ ok: true, summary: `${found.length}/${r.stores.length} stores available` });
     badge(found.length ? '!!!' : 'OK', found.length ? '#d00' : '#2a2');
     if (fresh.length) await alertFound(fresh, s.tabId, r.model);
     else if (now - (s.lastReloadAt || 0) > HEALTHY_RELOAD_MS && !found.length) await reloadTab(s.tabId);
   } else {
     fails += 1;
-    helperOk = await pingHelper({ ok: false, error: (r && r.error) || 'Unknown error' });
     badge('ERR', '#c60');
+    if (!failingSince) failingSince = now;
+    else if (failingSince > 0 && now - failingSince > FAILING_WARN_MS) {
+      await warnFailing();
+      failingSince = -1; // warned; stays quiet until a check works again
+    }
     const sinceReload = now - (s.lastReloadAt || 0);
     // A dead tab gets a minute to finish loading before we reload it again.
     if ((r && r.dead && sinceReload > 60_000) || (fails >= RELOAD_AFTER_FAILS && sinceReload > MIN_RELOAD_GAP_MS)) {
@@ -163,10 +187,10 @@ async function tick() {
     }
   }
 
-  await chrome.storage.local.set({ fails });
+  await chrome.storage.local.set({ fails, failingSince });
   const delay = nextDelay(fails);
   schedule(delay);
-  pushStatus(s.tabId, true, Date.now() + delay, helperOk);
+  pushStatus(s.tabId, true, Date.now() + delay);
 }
 
 function badge(text, color) {
@@ -180,37 +204,40 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     chrome.storage.local.set({ tabId: sender.tab.id }).then(async () => {
       const s = await getState();
       if (s.running && !timer) schedule(1_000);
-      pushStatus(sender.tab.id, !!s.running, null, await helperAlive());
+      pushStatus(sender.tab.id, !!s.running, null);
     });
   } else if (msg.type === 'start') {
-    chrome.storage.local.set({ running: true, fails: 0, alerted: [], lastReloadAt: Date.now() }).then(() => schedule(0));
+    chrome.storage.local
+      .set({ running: true, fails: 0, failingSince: null, alerted: [], lastReloadAt: Date.now() })
+      .then(() => schedule(0));
   } else if (msg.type === 'stop') {
     clearTimeout(timer);
     timer = null;
     chrome.storage.local.set({ running: false });
+    chrome.power.releaseKeepAwake();
+    stopVoice();
     badge('', '#888');
-    pingHelper({ stopped: true });
-    if (sender.tab) pushStatus(sender.tab.id, false, null, null);
+    if (sender.tab) pushStatus(sender.tab.id, false, null);
   } else if (msg.type === 'reset') {
     chrome.storage.local.set({ alerted: [], fails: 0 }).then(() => timer && schedule(1_000));
   } else if (msg.type === 'ack') {
-    helper('/ack');
-  } else if (msg.type === 'helper?') {
-    helperAlive().then(reply);
-    return true; // async reply
+    stopVoice();
   } else if (msg.type === 'test') {
     testChannel(msg.channel).then(reply);
-    return true;
+    return true; // async reply
   }
 });
 
+// Clicking the notification brings the tab back and silences the alarm.
 chrome.notifications.onClicked.addListener(async () => {
+  stopVoice();
   const { tabId } = await getState();
   if (tabId == null) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (tab) {
     chrome.windows.update(tab.windowId, { focused: true });
     chrome.tabs.update(tabId, { active: true });
+    chrome.tabs.sendMessage(tabId, { type: 'ack' }).catch(() => {});
   }
 });
 
@@ -220,11 +247,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 });
 
 // Chrome can shut down this service worker; the alarm wakes it up and restarts the loop.
-// It also tells the helper we're alive, since checks are minutes apart while backing off.
 chrome.alarms.create('watchdog', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(async () => {
   const s = await getState();
-  if (!s.running) return;
-  pingHelper({ alive: true });
-  if (!timer) schedule(0);
+  if (s.running && !timer) schedule(0);
 });

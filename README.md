@@ -29,7 +29,7 @@ Leave that tab open in its own window. Any store Apple lists near your postal co
 
 ## Alerts
 
-Choose any combination in the panel. Each one has a **Test** button, and any setup it needs is shown right there.
+Choose any combination in the panel. Each one has a **Test** button. Nothing to install: it's all in the extension.
 
 <p align="center">
   <picture>
@@ -41,14 +41,14 @@ Choose any combination in the panel. Each one has a **Test** button, and any set
 | Alert | What happens | Setup |
 |---|---|---|
 | **Chrome notification** (on by default) | A notification that stays until clicked; the tab jumps to the front | None. If nothing pops up, allow Google Chrome in macOS System Settings → Notifications |
-| **Loud alarm on this Mac** | Volume to max, a spoken alert on repeat, a dialog that stays until you click it. It also warns you out loud if monitoring stops | Paste the one-line command from the panel into Terminal |
+| **Say it out loud** (on by default) | Your Mac's voice repeats "iPhone … is in stock!" until you click **Silence alarm** or the notification | Keep the volume up and Mute off |
 | **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel |
 
 ## Keep it running
 
-- **Keep the lid open.** A sleeping Mac checks nothing. The Mac alarm keeps the Mac awake while it runs, and the screen can still turn off.
+- **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off).
 - **Keep Chrome from pausing the tab:** in `chrome://settings/performance`, add `apple.com` to *Always keep these sites active*.
-- If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers.
+- If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers. If checks keep failing for 5 minutes, it tells you once.
 
 ## Troubleshooting
 
@@ -57,6 +57,6 @@ Choose any combination in the panel. Each one has a **Test** button, and any set
 | `HTTP 541` | Nothing. Apple is rate-limiting; checks slow down (up to 5 minutes apart) and recover by themselves. |
 | The model list is empty | Enter the part number by hand (for example `MK1E4LL/A`). |
 | "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[iPhone Stock Alert] raw response`. |
-| Mac alarm says "Not running yet" | Run the command from the panel in Terminal and keep that window open. |
+| The voice test is silent | Turn the Mac's volume up and Mute off. |
 
-Developers: run tests with `node extension/test.js`; the Mac alarm is `helper/stock_alarm.py` (`--test` to hear it, `--dry-run` for silent mode).
+Developers: run tests with `node extension/test.js`.
