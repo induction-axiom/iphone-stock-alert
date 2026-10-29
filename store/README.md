@@ -40,6 +40,7 @@ Source code: https://github.com/induction-axiom/pickup-alert-for-iphone
 - **Store icon:** `extension/icons/icon128.png`
 - **Screenshots (1280×800):** `store/screenshot-1-watching.png`, `store/screenshot-2-in-stock.png`, `store/screenshot-3-alerts.png`
 - **Small promo tile (440×280):** `store/promo-small.png`
+- **Marquee promo tile (1400×560, optional):** `store/promo-marquee.png`
 - **Homepage URL:** https://github.com/induction-axiom/pickup-alert-for-iphone
 - **Support URL:** https://github.com/induction-axiom/pickup-alert-for-iphone/issues
 
@@ -77,4 +78,4 @@ Watches Apple Store in-store pickup availability for the iPhone model the user p
 
 ## Rebuilding the images
 
-Screenshots are the README's light-mode screenshots scaled to 1280×800; `store/assets.html` is the source for the promo tile and the alerts screenshot.
+Screenshots are the README's light-mode screenshots scaled to 1280×800; `store/assets.html` is the source for the promo tiles and the alerts screenshot.
