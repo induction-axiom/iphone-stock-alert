@@ -1,7 +1,8 @@
-// Drives the polling loop and sends alerts. Timers live here rather than in the page because
-// Chrome throttles timers in background tabs to once a minute; messages to the tab are not throttled.
+// Drives the polling loops and sends alerts. Every Apple tab is its own independent watch: its own
+// model, schedule, backoff and alerts. Timers live here rather than in the pages because Chrome
+// throttles timers in background tabs to once a minute; messages to a tab are not throttled.
 const NTFY = 'https://ntfy.sh/';
-const BUY_PAGES = 'https://www.apple.com/*shop/buy-iphone/*';
+const NAME = 'Pickup Alert for iPhone';
 const BASE_MS = 10_000;
 const JITTER_MS = 2_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
@@ -12,23 +13,55 @@ const TAB_TIMEOUT_MS = 20_000;
 const FAILING_WARN_MS = 5 * 60_000;
 const GAP_MS = 2 * 60_000; // a check this late means the Mac slept or Chrome was paused
 const VOICE_MAX_MS = 15 * 60_000;
+const WARN_EVERY_MS = 60 * 60_000; // problem warnings: at most one an hour per tab
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 
-let timer = null;
+// Only the last postal code and the phone topic are kept across tabs; earlier versions kept more.
+chrome.storage.local.remove(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted', 'nextAt', 'lastGap',
+  'target', 'manualPart', 'lang', 'channels', 'panelPos', 'collapsed']);
 
-const getState = () =>
-  chrome.storage.local.get(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted', 'nextAt']);
-
-async function getPrefs() {
-  const p = await chrome.storage.local.get(['lang', 'channels', 'ntfyTopic']);
-  const saved = p.channels || {};
-  const channels = Object.fromEntries(Object.entries(DEFAULT_CHANNELS).map(([k, on]) => [k, k in saved ? saved[k] : on]));
-  return { zh: p.lang === 'zh', channels, topic: p.ntfyTopic };
+// Language and alert choices belong to the tab (sent by its panel); the phone topic is shared.
+async function getPrefs(w) {
+  const { ntfyTopic } = await chrome.storage.local.get('ntfyTopic');
+  return { zh: !!w && w.lang === 'zh', channels: { ...DEFAULT_CHANNELS, ...(w && w.channels) }, topic: ntfyTopic };
 }
 
-function schedule(ms) {
-  clearTimeout(timer);
-  timer = setTimeout(tick, ms);
+// ---------- per-tab watches ----------
+// chrome.storage.session survives this service worker being shut down, and is cleared when
+// Chrome quits, which is also when tab ids stop meaning anything.
+
+const timers = new Map();
+let lock = Promise.resolve();
+const serial = (fn) => (lock = lock.then(fn, fn));
+
+const getWatches = async () => (await chrome.storage.session.get('watches')).watches || {};
+const getWatch = async (tabId) => (await getWatches())[tabId] || null;
+
+function updateWatch(tabId, patch) {
+  return serial(async () => {
+    const all = await getWatches();
+    if (patch) all[tabId] = { ...all[tabId], ...patch };
+    else delete all[tabId];
+    await chrome.storage.session.set({ watches: all });
+    return all[tabId] || null;
+  });
+}
+
+function schedule(tabId, ms) {
+  clearTimeout(timers.get(tabId));
+  timers.set(tabId, setTimeout(() => tick(tabId), ms));
+}
+
+function unschedule(tabId) {
+  clearTimeout(timers.get(tabId));
+  timers.delete(tabId);
+}
+
+// The Mac stays awake while any tab is watching; the screen may still sleep.
+async function syncKeepAwake() {
+  const running = Object.values(await getWatches()).some((w) => w.running);
+  if (running) chrome.power.requestKeepAwake('system');
+  else chrome.power.releaseKeepAwake();
 }
 
 function nextDelay(fails) {
@@ -36,10 +69,21 @@ function nextDelay(fails) {
   return base + Math.round((Math.random() * 2 - 1) * JITTER_MS);
 }
 
+function badge(tabId, text, color) {
+  chrome.action.setBadgeText({ tabId, text }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ tabId, color }).catch(() => {});
+}
+
+function sendStatus(tabId, w) {
+  const msg = { type: 'status', running: !!(w && w.running), nextAt: w && w.running ? w.nextAt : null, lastGap: (w && w.lastGap) || null };
+  chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+  return msg;
+}
+
 // ---------- alert channels ----------
 
-function notifyChrome(title, message) {
-  chrome.notifications.create('alert-' + Date.now(), {
+function notifyChrome(title, message, tabId) {
+  chrome.notifications.create(`alert-${tabId ?? 'x'}-${Date.now()}`, {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
     title,
@@ -77,16 +121,16 @@ function pushPhone(topic, title, message, url) {
     .catch(() => false);
 }
 
-async function alertFound(stores, tabId, model) {
-  const { zh, channels, topic } = await getPrefs();
+async function alertFound(tabId, w, stores, model) {
+  const { zh, channels, topic } = await getPrefs(w);
   const title = zh ? `🚨 ${model} 有货了！快去下单` : `🚨 ${model} is in stock! Go buy it`;
   const message = stores.map((x) => `${x.name} ${x.distance} — ${x.quote}`).join('\n');
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab ? tab.url : '';
 
-  broadcast({ type: 'found' }); // every panel flashes either way
+  chrome.tabs.sendMessage(tabId, { type: 'found' }).catch(() => {}); // the panel flashes either way
   if (channels.chrome) {
-    notifyChrome(title, message);
+    notifyChrome(title, message, tabId);
     if (tab) {
       await chrome.windows.update(tab.windowId, { focused: true, drawAttention: true, state: 'normal' }).catch(() => {});
       await chrome.tabs.update(tabId, { active: true }).catch(() => {});
@@ -99,38 +143,46 @@ async function alertFound(stores, tabId, model) {
   if (channels.phone && topic) pushPhone(topic, title, message, url);
 }
 
-// Said once when checks have been failing for a while, so a silent panel isn't mistaken for "no stock".
-async function warnFailing() {
-  const { zh, channels } = await getPrefs();
+// Problem warnings (checks failing, a sleep gap, a closed tab) can be turned off per tab, never speak,
+// and come at most once an hour, so a night of Apple rate limits doesn't keep anyone up.
+const warnsOn = (w) => !w || w.warn !== false;
+
+// Sent once when a tab's checks have been failing for a while, so a quiet panel isn't mistaken for "no stock".
+async function warnFailing(tabId, w, model) {
+  if (!warnsOn(w)) return;
+  const { zh, channels, topic } = await getPrefs(w);
   const text = zh
-    ? '库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。'
-    : "Stock checks haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.";
-  if (channels.chrome) notifyChrome('Pickup Alert for iPhone', text);
-  if (channels.voice) speak(text, zh, false);
+    ? `${model || 'iPhone'} 的库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。`
+    : `Stock checks for ${model || 'your iPhone'} haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.`;
+  if (channels.chrome) notifyChrome(NAME, text, tabId);
+  if (channels.phone && topic) pushPhone(topic, NAME, text, '');
 }
 
 // Checks can't run while the Mac sleeps, so say how long they were paused once they're back.
-async function reportGap(minutes) {
-  await chrome.storage.local.set({ lastGap: { minutes, at: Date.now() } });
-  const { zh, channels, topic } = await getPrefs();
+async function reportGap(w, minutes) {
+  if (!warnsOn(w)) return;
+  const model = w.model;
+  const { zh, channels, topic } = await getPrefs(w);
   const text = zh
-    ? `监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`
-    : `Monitoring was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`;
-  if (channels.phone && topic) pushPhone(topic, 'Pickup Alert for iPhone', text, '');
+    ? `${model || 'iPhone'} 的监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`
+    : `Watching ${model || 'your iPhone'} was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`;
+  if (channels.phone && topic) pushPhone(topic, NAME, text, '');
 }
 
-async function reportTabClosed() {
-  const { zh, channels, topic } = await getPrefs();
+async function reportTabClosed(w) {
+  if (!warnsOn(w)) return;
+  const model = w.model;
+  const { zh, channels, topic } = await getPrefs(w);
   const text = zh
-    ? '监控已停止：Apple 页面被关掉了。重新打开该页面即可继续。'
-    : 'Monitoring stopped: the Apple page was closed. Open it again to resume.';
-  if (channels.chrome) notifyChrome('Pickup Alert for iPhone', text);
-  if (channels.phone && topic) pushPhone(topic, 'Pickup Alert for iPhone', text, '');
+    ? `已停止监控 ${model || 'iPhone'}：Apple 页面被关掉了。`
+    : `Stopped watching ${model || 'your iPhone'}: its Apple page was closed.`;
+  if (channels.chrome) notifyChrome(NAME, text);
+  if (channels.phone && topic) pushPhone(topic, NAME, text, '');
 }
 
-async function testChannel(channel) {
-  const { zh, topic } = await getPrefs();
-  const title = zh ? 'iPhone 取货提醒测试' : 'Pickup Alert for iPhone test';
+async function testChannel(channel, lang) {
+  const { zh, topic } = await getPrefs({ lang });
+  const title = zh ? 'iPhone 取货提醒测试' : `${NAME} test`;
   const message = zh ? '这是一条测试提醒，到货时会是这样。' : 'This is a test. A real alert looks like this.';
   if (channel === 'chrome') {
     notifyChrome(title, message);
@@ -146,33 +198,6 @@ async function testChannel(channel) {
 
 // ---------- polling ----------
 
-// One tab (the "watcher", stored as tabId) runs the checks. Every open buy page shows the same
-// panel, so results and status go to all of them.
-const buyTabs = () => chrome.tabs.query({ url: BUY_PAGES }).catch(() => []);
-
-async function broadcast(msg, exceptId) {
-  for (const tab of await buyTabs()) {
-    if (tab.id !== exceptId) chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
-  }
-}
-
-async function statusAll() {
-  const s = await getState();
-  for (const tab of await buyTabs()) {
-    chrome.tabs
-      .sendMessage(tab.id, { type: 'status', running: !!s.running, nextAt: s.running ? s.nextAt : null, watcher: tab.id === s.tabId })
-      .catch(() => {});
-  }
-}
-
-async function makeWatcher(tabId) {
-  await chrome.storage.local.set({ tabId, fails: 0, nextAt: null });
-  chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
-  const s = await getState();
-  if (s.running) schedule(1_000);
-  statusAll();
-}
-
 function askTab(tabId) {
   return Promise.race([
     chrome.tabs.sendMessage(tabId, { type: 'check' }),
@@ -180,129 +205,138 @@ function askTab(tabId) {
   ]);
 }
 
-async function reloadTab(tabId) {
-  await chrome.storage.local.set({ lastReloadAt: Date.now() });
-  await chrome.tabs.reload(tabId).catch(() => {});
-}
-
-async function tick() {
-  timer = null;
-  const s = await getState();
-  if (!s.running) return;
-  chrome.power.requestKeepAwake('system'); // the screen may sleep, the Mac may not
-  if (s.tabId == null) {
-    badge('?', '#888');
-    await chrome.storage.local.set({ nextAt: null });
-    statusAll();
-    return; // waits for a 'hello' from an open iPhone buy page
+async function tick(tabId) {
+  timers.delete(tabId);
+  const w = await getWatch(tabId);
+  if (!w || !w.running) return;
+  if (!(await chrome.tabs.get(tabId).catch(() => null))) return forget(tabId);
+  const now = Date.now();
+  let lastGap = w.lastGap || null;
+  let lastWarnAt = w.lastWarnAt || 0;
+  const mayWarn = () => now - lastWarnAt > WARN_EVERY_MS && (lastWarnAt = now);
+  if (w.nextAt && now - w.nextAt > GAP_MS) {
+    lastGap = { minutes: Math.round((now - w.nextAt) / 60_000), at: now };
+    if (mayWarn()) reportGap(w, lastGap.minutes);
   }
-  if (s.nextAt && Date.now() - s.nextAt > GAP_MS) await reportGap(Math.round((Date.now() - s.nextAt) / 60_000));
 
   let r;
   try {
-    r = await askTab(s.tabId);
+    r = await askTab(tabId);
   } catch (e) {
     r = { ok: false, dead: true };
   }
-  if (r && !r.dead) broadcast({ type: 'result', r }, s.tabId);
-  const now = Date.now();
-  let fails = s.fails || 0;
-  let failingSince = s.failingSince || null;
+  let fails = w.fails || 0;
+  let failingSince = w.failingSince || null;
+  let alerted = w.alerted || [];
+  let lastReloadAt = w.lastReloadAt || 0;
+  const model = (r && r.model) || w.model;
+  const reload = () => {
+    lastReloadAt = Date.now();
+    chrome.tabs.reload(tabId).catch(() => {});
+  };
 
   if (r && r.ok) {
     fails = 0;
     failingSince = null;
     const found = r.stores.filter((x) => x.available);
-    const fresh = found.filter((x) => !(s.alerted || []).includes(x.id));
-    await chrome.storage.local.set({ alerted: found.map((x) => x.id) });
-    badge(found.length ? '!!!' : 'OK', found.length ? '#d00' : '#2a2');
-    if (fresh.length) await alertFound(fresh, s.tabId, r.model);
-    else if (now - (s.lastReloadAt || 0) > HEALTHY_RELOAD_MS && !found.length) await reloadTab(s.tabId);
+    const fresh = found.filter((x) => !alerted.includes(x.id));
+    alerted = found.map((x) => x.id);
+    badge(tabId, found.length ? '!!!' : 'OK', found.length ? '#d00' : '#2a2');
+    if (fresh.length) await alertFound(tabId, w, fresh, r.model);
+    else if (now - lastReloadAt > HEALTHY_RELOAD_MS && !found.length) reload();
   } else {
     fails += 1;
-    badge('ERR', '#c60');
+    badge(tabId, 'ERR', '#c60');
     if (!failingSince) failingSince = now;
     else if (failingSince > 0 && now - failingSince > FAILING_WARN_MS) {
-      await warnFailing();
-      failingSince = -1; // warned; stays quiet until a check works again
+      if (mayWarn()) await warnFailing(tabId, w, model);
+      failingSince = -1; // stays quiet until a check works again
     }
-    const sinceReload = now - (s.lastReloadAt || 0);
+    const sinceReload = now - lastReloadAt;
     // A dead tab gets a minute to finish loading before we reload it again.
-    if ((r && r.dead && sinceReload > 60_000) || (fails >= RELOAD_AFTER_FAILS && sinceReload > MIN_RELOAD_GAP_MS)) {
-      await reloadTab(s.tabId);
-    }
+    if ((r && r.dead && sinceReload > 60_000) || (fails >= RELOAD_AFTER_FAILS && sinceReload > MIN_RELOAD_GAP_MS)) reload();
   }
 
   const delay = nextDelay(fails);
-  await chrome.storage.local.set({ fails, failingSince, nextAt: Date.now() + delay });
-  schedule(delay);
-  statusAll();
+  const updated = await updateWatch(tabId, { fails, failingSince, alerted, lastReloadAt, lastGap, lastWarnAt, model, nextAt: Date.now() + delay });
+  if (!updated || !updated.running) return; // stopped while this check was running
+  schedule(tabId, delay);
+  sendStatus(tabId, updated);
 }
 
-function badge(text, color) {
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color });
+async function forget(tabId) {
+  unschedule(tabId);
+  await updateWatch(tabId, null);
+  syncKeepAwake();
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (msg.type === 'hello' && sender.tab) {
-    // A new buy page only takes over when no other tab is checking.
-    getState().then(async (s) => {
-      const current = s.tabId != null && (await chrome.tabs.get(s.tabId).catch(() => null));
-      if (!current || s.tabId === sender.tab.id) return makeWatcher(sender.tab.id);
-      statusAll();
+  const tabId = sender.tab && sender.tab.id;
+  if (msg.type === 'hello' && tabId != null) {
+    // A reloaded tab keeps watching; one that moved to another iPhone's page stops.
+    getWatch(tabId).then(async (w) => {
+      if (w && w.running && w.family !== msg.family) w = await updateWatch(tabId, { running: false, nextAt: null });
+      if (w && w.running && !timers.has(tabId)) schedule(tabId, 1_000);
+      if (!w || !w.running) badge(tabId, '', '#888');
+      syncKeepAwake();
+      reply(sendStatus(tabId, w));
     });
-  } else if (msg.type === 'takeover' && sender.tab) {
-    makeWatcher(sender.tab.id);
-  } else if (msg.type === 'start') {
-    chrome.storage.local
-      .set({ running: true, fails: 0, failingSince: null, alerted: [], lastReloadAt: Date.now(), nextAt: null, lastGap: null })
-      .then(() => (sender.tab ? makeWatcher(sender.tab.id) : schedule(0)));
-  } else if (msg.type === 'stop') {
-    clearTimeout(timer);
-    timer = null;
-    chrome.storage.local.set({ running: false, nextAt: null });
-    chrome.power.releaseKeepAwake();
+    return true;
+  }
+  if (msg.type === 'start' && tabId != null) {
+    updateWatch(tabId, {
+      running: true, family: msg.family, lang: msg.lang, channels: msg.channels, warn: msg.warn, model: null, fails: 0,
+      failingSince: null, alerted: [], lastReloadAt: Date.now(), nextAt: null, lastGap: null,
+    }).then((w) => {
+      chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
+      syncKeepAwake();
+      schedule(tabId, 0);
+      sendStatus(tabId, w);
+    });
+  } else if (msg.type === 'stop' && tabId != null) {
+    unschedule(tabId);
     stopVoice();
-    badge('', '#888');
-    statusAll();
-  } else if (msg.type === 'reset') {
-    chrome.storage.local.set({ alerted: [], fails: 0 }).then(() => timer && schedule(1_000));
+    badge(tabId, '', '#888');
+    updateWatch(tabId, { running: false, nextAt: null }).then((w) => {
+      syncKeepAwake();
+      sendStatus(tabId, w);
+    });
+  } else if (msg.type === 'reset' && tabId != null) {
+    updateWatch(tabId, { alerted: [], fails: 0, model: null }).then((w) => w && w.running && schedule(tabId, 1_000));
+  } else if (msg.type === 'prefs' && tabId != null) {
+    updateWatch(tabId, { lang: msg.lang, channels: msg.channels, warn: msg.warn });
+  } else if (msg.type === 'dismissGap' && tabId != null) {
+    updateWatch(tabId, { lastGap: null });
   } else if (msg.type === 'ack') {
     stopVoice();
-    broadcast({ type: 'ack' }, sender.tab && sender.tab.id);
   } else if (msg.type === 'test') {
-    testChannel(msg.channel).then(reply);
+    testChannel(msg.channel, msg.lang).then(reply);
     return true; // async reply
   }
 });
 
-// Clicking the notification brings the tab back and silences the alarm.
-chrome.notifications.onClicked.addListener(async () => {
+// Clicking an alert brings its tab back and silences the alarm.
+chrome.notifications.onClicked.addListener(async (id) => {
   stopVoice();
-  const { tabId } = await getState();
-  if (tabId == null) return;
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (tab) {
-    chrome.windows.update(tab.windowId, { focused: true });
-    chrome.tabs.update(tabId, { active: true });
-  }
-  broadcast({ type: 'ack' });
+  const tabId = Number(id.split('-')[1]);
+  const tab = Number.isInteger(tabId) ? await chrome.tabs.get(tabId).catch(() => null) : null;
+  if (!tab) return;
+  chrome.windows.update(tab.windowId, { focused: true });
+  chrome.tabs.update(tabId, { active: true });
+  chrome.tabs.sendMessage(tabId, { type: 'ack' }).catch(() => {});
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
-  const s = await getState();
-  if (tabId !== s.tabId) return;
-  // Hand over to another open buy page if there is one; only warn when none is left.
-  const next = (await buyTabs()).find((tab) => tab.id !== tabId);
-  if (next) return makeWatcher(next.id);
-  await chrome.storage.local.set({ tabId: null, nextAt: null });
-  if (s.running) reportTabClosed();
+  const w = await getWatch(tabId);
+  if (!w) return;
+  await forget(tabId);
+  if (w.running) reportTabClosed(w);
 });
 
-// Chrome can shut down this service worker; the alarm wakes it up and restarts the loop.
+// Chrome can shut down this service worker; the alarm wakes it up and restarts every loop.
 chrome.alarms.create('watchdog', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(async () => {
-  const s = await getState();
-  if (s.running && !timer) schedule(0);
+  for (const [id, w] of Object.entries(await getWatches())) {
+    if (w.running && !timers.has(Number(id))) schedule(Number(id), 0);
+  }
 });

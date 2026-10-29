@@ -20,6 +20,8 @@ A small panel sits on Apple's own buy page and checks nearby stores about every 
 
 Leave that tab open in its own window. Any store Apple lists near your postal code counts, and the panel shows how far each one is.
 
+**Each Apple tab is its own watch.** To watch two iPhones, open each one's buy page in its own tab and start both. A tab's model and alert choices stay with that tab (a refresh keeps them) and are gone when you close it; only your last postal code and phone topic are remembered.
+
 When it shows up, the panel turns red and every alert you picked goes off:
 
 <picture>
@@ -44,13 +46,15 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 |---|---|---|
 | **Chrome notification** (on by default) | A notification that stays until clicked; the tab jumps to the front | None. If nothing pops up, allow Google Chrome in macOS System Settings → Notifications |
 | **Say it out loud** (on by default) | Your Mac's voice repeats "iPhone … is in stock!" until you click **Silence alarm** or the notification | Keep the volume up and Mute off |
-| **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel |
+| **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel. It starts as a random UUID; you can paste your own or make a new one |
+
+**Problems** (on by default): if checks keep failing for 5 minutes, the Mac was asleep, or a watching tab was closed, you get one Chrome notification (and a phone push if that's on). Never by voice, and at most once an hour per tab, so a night of Apple rate limits won't keep you up. Turn it off in the panel to stay quiet.
 
 ## Keep it running
 
-- **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off). If checks were paused anyway, the panel says for how long, and so does your phone if phone alerts are on. Closing the Apple tab also sends an alert.
+- **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off). If checks were paused anyway, the panel says for how long.
 - **Keep Chrome from pausing the tab:** in `chrome://settings/performance`, add `apple.com` to *Always keep these sites active*.
-- If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers. If checks keep failing for 5 minutes, it tells you once.
+- If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers.
 
 ## Troubleshooting
 

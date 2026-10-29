@@ -9,15 +9,12 @@ let models = [];
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 let lang = 'en';
 // lastOk is the latest successful result; result is the latest check, which may have failed.
-const view = { running: false, ringing: false, result: null, lastOk: null, checkedAt: null, okAt: null, nextAt: null, editing: false, testNote: null, isWatcher: true };
+const view = { running: false, ringing: false, result: null, lastOk: null, checkedAt: null, okAt: null, nextAt: null, editing: false, testNote: null, lastGap: null };
 
 const STRINGS = {
   en: {
     noPostal: 'Enter your postal code first',
     noModel: 'Pick a model first',
-    otherProduct: (label, here) => `You're watching ${label}, but this page is ${here}. Pick a model here to switch.`,
-    elsewhere: 'Checking from another Apple tab.',
-    watchHere: 'Check from here',
     network: (m) => 'Network error: ' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? ': temporarily blocked by Apple' : ''),
     notJson: 'Response was not JSON (probably blocked)',
@@ -39,6 +36,11 @@ const STRINGS = {
     retry: (n) => ` · retrying in ${n}s`,
     watching: 'Watching',
     alerts: 'Alerts',
+    problems: 'Problems',
+    problemsOn: 'Tell me once if checks stop working (never by voice)',
+    problemsOff: "Stay quiet if checks stop working",
+    on: 'On',
+    off: 'Off',
     edit: 'Edit',
     done: 'Done',
     notSet: 'Pick a model and postal code',
@@ -52,6 +54,9 @@ const STRINGS = {
     testResult: (list) => `Test sent: ${list}.`,
     chromeHelp: 'No notification? Allow Google Chrome in macOS System Settings → Notifications, and turn off Focus.',
     phoneHow: 'Install the free ntfy app, tap +, and subscribe to this topic:',
+    topicHint: 'Anyone who knows the topic can read these alerts, so keep it long and random. You can paste your own.',
+    badTopic: 'Use 1–64 letters, numbers, - or _',
+    newTopic: 'New',
     fine: 'Checks only while this tab is open and your Mac is awake. Closing the lid or quitting Chrome pauses it.',
     gap: (m, at) => `Paused ${m} min (Mac asleep or Chrome paused) · resumed ${at}`,
     dismiss: 'Dismiss',
@@ -72,9 +77,6 @@ const STRINGS = {
   zh: {
     noPostal: '请先填邮编',
     noModel: '请先选机型',
-    otherProduct: (label, here) => `你在监控 ${label}，但这个页面是 ${here}。在这里选一个机型即可切换。`,
-    elsewhere: '正在另一个 Apple 页面里检查。',
-    watchHere: '改在这里检查',
     network: (m) => '网络错误：' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? '，被 Apple 暂时限制' : ''),
     notJson: '返回的不是 JSON（可能被限制）',
@@ -96,6 +98,11 @@ const STRINGS = {
     retry: (n) => ` · ${n} 秒后重试`,
     watching: '监控',
     alerts: '提醒',
+    problems: '异常',
+    problemsOn: '检查一直失败时提醒一次（不会用语音）',
+    problemsOff: '检查失败时不提醒',
+    on: '开',
+    off: '关',
     edit: '修改',
     done: '完成',
     notSet: '请选机型、填邮编',
@@ -109,6 +116,9 @@ const STRINGS = {
     testResult: (list) => `已发送测试：${list}。`,
     chromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知，并关掉专注模式。',
     phoneHow: '安装免费的 ntfy App，点 +，订阅这个主题：',
+    topicHint: '知道主题名的人都能看到这些提醒，所以要够长、够随机。也可以粘贴你自己的主题。',
+    badTopic: '只能用 1–64 个字母、数字、- 或 _',
+    newTopic: '换一个',
     fine: '只在这个页面开着、Mac 醒着时检查。合上盖子或退出 Chrome 会暂停。',
     gap: (m, at) => `暂停了 ${m} 分钟（Mac 睡眠或 Chrome 被暂停）· ${at} 已恢复`,
     dismiss: '关闭',
@@ -132,11 +142,46 @@ const t = (key, ...args) => {
   return typeof s === 'function' ? s(...args) : s;
 };
 
+// Each tab is its own watch. Its settings live in the page's sessionStorage, so they survive this
+// tab reloading (the extension reloads it to refresh Apple's cookies) and vanish when it closes.
+// Only the last postal code and the phone topic are remembered across tabs.
+function tabGet(name) {
+  try {
+    return sessionStorage.getItem('pickupAlert.' + name) || '';
+  } catch (e) {
+    return '';
+  }
+}
+function tabSet(name, value) {
+  try {
+    if (value) sessionStorage.setItem('pickupAlert.' + name, value);
+    else sessionStorage.removeItem('pickupAlert.' + name);
+  } catch (e) {}
+}
+const tabJson = (name) => {
+  try {
+    return JSON.parse(tabGet(name) || 'null');
+  } catch (e) {
+    return null;
+  }
+};
+
 async function getConfig() {
-  const c = await chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang', 'channels', 'ntfyTopic', 'lastGap']);
-  const saved = c.channels || {};
-  c.channels = Object.fromEntries(Object.entries(DEFAULT_CHANNELS).map(([k, on]) => [k, k in saved ? saved[k] : on]));
+  const c = await chrome.storage.local.get(['postal', 'ntfyTopic']);
+  c.target = tabGet('model.' + family); // per product, so moving this tab to another iPhone starts clean
+  c.manualPart = tabGet('part.' + family);
+  c.lang = tabGet('lang') === 'zh' ? 'zh' : 'en';
+  c.collapsed = tabGet('collapsed') === '1';
+  c.panelPos = tabJson('pos');
+  c.channels = { ...DEFAULT_CHANNELS, ...tabJson('channels') };
+  c.warn = tabGet('warn') !== 'off';
   return c;
+}
+
+// The background needs this tab's alert choices and language to send its alerts.
+async function sendPrefs() {
+  const c = await getConfig();
+  chrome.runtime.sendMessage({ type: 'prefs', lang: c.lang, channels: c.channels, warn: c.warn }).catch(() => {});
 }
 
 const modelKey = (m) => [m.screen, m.capacity, m.color].join('|');
@@ -154,11 +199,10 @@ function modelLabel(m) {
   return `${screen}${m.capacity.toUpperCase()} · ${colorLabel(m)}`;
 }
 
-// The target is stored as dimension values, not a part number, because part numbers differ per
+// The model is stored as dimension values, not a part number, because part numbers differ per
 // country (LL/A in the US, VC/A in Canada...).
 function currentModel(c) {
-  const t = c.target;
-  return (t && t.family === family && models.find((m) => modelKey(m) === t.key)) || null;
+  return models.find((m) => modelKey(m) === c.target) || null;
 }
 
 // First visit to a product: preselect the model in the URL, e.g. .../256gb-star-white-unlocked.
@@ -167,14 +211,13 @@ async function pickFromUrl() {
   if (currentModel(c)) return;
   const path = location.pathname.replace(/[^a-z0-9]/g, '');
   const m = models.find((x) => path.includes(x.capacity + x.color) && (!x.screen || path.includes(x.screen.replace(/[^a-z0-9]/g, ''))));
-  if (m) await chrome.storage.local.set({ target: { family, key: modelKey(m) } });
+  if (m) tabSet('model.' + family, modelKey(m));
 }
 
 // Results keep an error key plus arguments, so switching language re-renders them correctly.
 async function check() {
   const c = await getConfig();
   if (!c.postal) return { ok: false, err: ['noPostal'] };
-  if (c.target && c.target.family !== family) return { ok: false, err: ['otherProduct', c.target.label, familyLabel] };
   const model = currentModel(c);
   const part = model ? model.part : !models.length && c.manualPart;
   if (!part) return { ok: false, err: ['noModel'] };
@@ -275,9 +318,9 @@ root.innerHTML = `
   .srow .k { width: 50px; flex: none; color: var(--muted); align-self: flex-start; padding-top: 7px; }
   .srow .v { flex: 1; min-width: 0; padding: 6px 0; line-height: 1.4; }
   .srow .v.unset { color: var(--amber); }
+  .srow .v.hintv { color: var(--muted); font-size: 11px; }
   button.link { all: unset; color: var(--blue); font-weight: 600; font-size: 12px; cursor: pointer; padding: 2px 4px; margin-right: -4px; border-radius: 6px; align-self: flex-start; margin-top: 5px; }
   .code button.link { align-self: center; margin-top: 0; }
-  .meta button.link { margin-top: 0; }
   button.link:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
   .toggles { display: flex; flex-wrap: wrap; gap: 4px; }
   button.tog { all: unset; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; cursor: pointer;
@@ -299,6 +342,7 @@ root.innerHTML = `
   .howto { padding: 0 0 8px; color: var(--muted); font-size: 11px; }
   .howto a { color: var(--blue); }
   .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 5px 5px 5px 8px; border-radius: 8px; background: var(--bg); }
+  .code input.topic { all: unset; flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); }
   .code code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); word-break: break-all; }
 
   .stores { border-top: 1px solid var(--line); max-height: 220px; overflow: auto; transition: opacity .2s; }
@@ -346,7 +390,6 @@ root.innerHTML = `
   <div class="body">
     <div class="headline"></div>
     <div class="meta" data-v="times"></div>
-    <div class="meta" data-v="elsewhere" hidden><span data-t="elsewhere"></span> <button class="link" data-a="takeover" data-t="watchHere"></button></div>
     <div class="status">
       <div class="srow">
         <span class="k" data-t="watching"></span><span class="v" data-v="watchText"></span>
@@ -367,7 +410,12 @@ root.innerHTML = `
       <div class="howto" data-v="testNote" hidden></div>
       <div class="howto" data-v="phoneHow" hidden>
         <span data-t="phoneHow"></span> <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a>
-        <div class="code"><code data-v="topic"></code><button class="link" data-copy="topic" data-t="copy"></button></div>
+        <div class="code"><input class="topic" data-k="ntfyTopic" spellcheck="false"><button class="link" data-copy="topic" data-t="copy"></button><button class="link" data-a="newTopic" data-t="newTopic"></button></div>
+        <div data-v="topicHint"></div>
+      </div>
+      <div class="srow">
+        <span class="k" data-t="problems"></span><span class="v hintv" data-v="warnText"></span>
+        <button class="tog" data-a="warn"></button>
       </div>
     </div>
     <div class="stores"></div>
@@ -401,13 +449,11 @@ async function render() {
 
   // Status: what is being watched and how alerts are set, always visible.
   const model = currentModel(c);
-  const elsewhere = !model && c.target && c.target.family !== family && c.target.label; // watching another iPhone
-  const what = model ? `${familyLabel} ${modelLabel(model)}` : elsewhere || (!models.length && c.manualPart ? c.manualPart : null);
+  const what = model ? `${familyLabel} ${modelLabel(model)}` : !models.length && c.manualPart ? c.manualPart : null;
   const ready = !!(what && c.postal);
   $('[data-v=watchText]').textContent = ready ? `${what} · ${c.postal}` : t('notSet');
   $('[data-v=watchText]').classList.toggle('unset', !ready);
   const editing = view.editing || !ready;
-  $('[data-v=elsewhere]').hidden = !(view.running && !view.isWatcher);
   $('[data-v=fields]').hidden = !editing;
   $('[data-a=edit]').textContent = editing ? t('done') : t('edit');
   $('[data-a=edit]').hidden = editing && !ready;
@@ -421,7 +467,13 @@ async function render() {
     b.setAttribute('aria-pressed', String(on));
   }
   $('[data-v=phoneHow]').hidden = !c.channels.phone;
-  $('[data-v=topic]').textContent = c.ntfyTopic || '';
+  $('[data-v=warnText]').textContent = c.warn ? t('problemsOn') : t('problemsOff');
+  $('[data-a=warn]').textContent = c.warn ? t('on') : t('off');
+  $('[data-a=warn]').setAttribute('aria-pressed', String(c.warn));
+  const topicInput = $('[data-k=ntfyTopic]');
+  if (root.activeElement !== topicInput) topicInput.value = c.ntfyTopic || '';
+  $('[data-v=topicHint]').textContent = view.badTopic ? t('badTopic') : t('topicHint');
+  $('[data-v=topicHint]').style.color = view.badTopic ? 'var(--amber)' : '';
   $('[data-v=testNote]').hidden = !view.testNote;
   if (view.testNote) {
     const list = view.testNote.map(([k, ok]) => `${t('short')[k]} ${ok ? '✓' : '✗'}`).join(' · ');
@@ -466,8 +518,8 @@ async function render() {
   $('.stores').classList.toggle('stale', !!failed);
   $('[data-v=delivery]').textContent = ok && ok.delivery ? t('delivery', ok.delivery) : '';
 
-  $('[data-v=gap]').hidden = !c.lastGap;
-  if (c.lastGap) $('[data-v=gapText]').textContent = t('gap', c.lastGap.minutes, clock(c.lastGap.at));
+  $('[data-v=gap]').hidden = !view.lastGap;
+  if (view.lastGap) $('[data-v=gapText]').textContent = t('gap', view.lastGap.minutes, clock(view.lastGap.at));
   $('[data-a=dismissGap]').title = t('dismiss');
 
   $('[data-a=toggle]').textContent = view.running ? t('stop') : t('start');
@@ -492,9 +544,8 @@ function renderModelOptions(selected) {
 
 async function initPanel() {
   const c = await getConfig();
-  // Topics made by earlier versions were short enough to guess; replace them.
-  if (c.ntfyTopic && !isStrongTopic(c.ntfyTopic)) await chrome.storage.local.set({ ntfyTopic: randomTopic() });
-  view.running = !!c.running;
+  // Topics made by an early version were short enough to guess; replace them.
+  if (/^iphone-alert-[0-9a-z]{8}$/.test(c.ntfyTopic || '')) await chrome.storage.local.set({ ntfyTopic: randomTopic() });
   $('[data-k=postal]').value = c.postal || '';
   $('[data-k=manualPart]').value = c.manualPart || '';
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
@@ -502,9 +553,8 @@ async function initPanel() {
   setInterval(() => view.running && render(), 1000);
 }
 
-// ntfy topics are public to anyone who knows the name, so the name is a full random UUID.
+// ntfy topics are public to anyone who knows the name, so a new one is a full random UUID.
 const randomTopic = () => 'iphone-alert-' + crypto.randomUUID();
-const isStrongTopic = (topic) => /^iphone-alert-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(topic);
 
 // Editing settings makes the panel taller; nudge a dragged panel back inside the window.
 function keepInView() {
@@ -538,7 +588,7 @@ $('[data-drag]').addEventListener('pointerdown', (e) => {
   const up = () => {
     bar.removeEventListener('pointermove', move);
     bar.removeEventListener('pointerup', up);
-    if (pos) chrome.storage.local.set({ panelPos: pos });
+    if (pos) tabSet('pos', JSON.stringify(pos));
   };
   bar.addEventListener('pointermove', move);
   bar.addEventListener('pointerup', up);
@@ -549,13 +599,16 @@ root.addEventListener('change', async (e) => {
   if (!k) return;
   const v = e.target.value.trim();
   if (k === 'model') {
-    const m = models.find((x) => modelKey(x) === v);
-    await chrome.storage.local.set({ target: m ? { family, key: v, label: `${familyLabel} ${modelLabel(m)}` } : null });
+    tabSet('model', v);
     chrome.runtime.sendMessage({ type: 'reset' }); // a new model deserves fresh alerts
-    chrome.runtime.sendMessage({ type: 'takeover' }); // and is checked from the page it was picked on
     view.lastOk = null;
+  } else if (k === 'manualPart') {
+    tabSet('part.' + family, v);
+  } else if (k === 'ntfyTopic') {
+    view.badTopic = !/^[-_A-Za-z0-9]{1,64}$/.test(v);
+    if (!view.badTopic) await chrome.storage.local.set({ ntfyTopic: v });
   } else {
-    await chrome.storage.local.set({ [k]: v });
+    await chrome.storage.local.set({ [k]: v }); // postal: the last one used is remembered
   }
   render();
 });
@@ -563,7 +616,8 @@ root.addEventListener('change', async (e) => {
 root.addEventListener('click', async (e) => {
   const langBtn = e.target.closest('[data-lang]');
   if (langBtn) {
-    await chrome.storage.local.set({ lang: langBtn.dataset.lang });
+    tabSet('lang', langBtn.dataset.lang);
+    sendPrefs();
     return render();
   }
   const toggle = e.target.closest('[data-ch]');
@@ -571,15 +625,15 @@ root.addEventListener('click', async (e) => {
     const ch = toggle.dataset.ch;
     const c = await getConfig();
     const on = !c.channels[ch];
-    const update = { channels: { ...c.channels, [ch]: on } };
-    if (ch === 'phone' && on && !c.ntfyTopic) update.ntfyTopic = randomTopic();
-    await chrome.storage.local.set(update);
+    tabSet('channels', JSON.stringify({ ...c.channels, [ch]: on }));
+    if (ch === 'phone' && on && !c.ntfyTopic) await chrome.storage.local.set({ ntfyTopic: randomTopic() });
+    sendPrefs();
     view.testNote = null;
     return render();
   }
   const copyBtn = e.target.closest('[data-copy]');
   if (copyBtn) {
-    await navigator.clipboard.writeText($(`[data-v=${copyBtn.dataset.copy}]`).textContent);
+    await navigator.clipboard.writeText($('[data-k=ntfyTopic]').value);
     copyBtn.textContent = t('copied');
     return;
   }
@@ -589,10 +643,8 @@ root.addEventListener('click', async (e) => {
   if (a === 'toggle') {
     view.running = !view.running;
     if (!view.running) view.nextAt = null;
-    await chrome.storage.local.set({ running: view.running });
-    chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop' });
-  } else if (a === 'takeover') {
-    chrome.runtime.sendMessage({ type: 'takeover' });
+    const c = await getConfig();
+    chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop', family, lang: c.lang, channels: c.channels, warn: c.warn });
   } else if (a === 'edit') {
     view.editing = !view.editing;
   } else if (a === 'test') {
@@ -604,19 +656,32 @@ root.addEventListener('click', async (e) => {
     card.classList.add('flash');
     setTimeout(() => card.classList.remove('flash'), 3200);
     view.testNote = await Promise.all(
-      on.map(async (k) => [k, await chrome.runtime.sendMessage({ type: 'test', channel: k }).catch(() => false)])
+      on.map(async (k) => [k, await chrome.runtime.sendMessage({ type: 'test', channel: k, lang: c.lang }).catch(() => false)])
     );
   } else if (a === 'ack') {
     stopFlash();
     chrome.runtime.sendMessage({ type: 'ack' });
+  } else if (a === 'warn') {
+    const c = await getConfig();
+    tabSet('warn', c.warn ? 'off' : '');
+    sendPrefs();
+  } else if (a === 'newTopic') {
+    view.badTopic = false;
+    await chrome.storage.local.set({ ntfyTopic: randomTopic() });
   } else if (a === 'dismissGap') {
-    await chrome.storage.local.set({ lastGap: null });
+    view.lastGap = null;
+    chrome.runtime.sendMessage({ type: 'dismissGap' });
   } else if (a === 'collapse') {
     const c = await getConfig();
-    await chrome.storage.local.set({ collapsed: !c.collapsed });
+    tabSet('collapsed', c.collapsed ? '' : '1');
   }
   render();
 });
+
+function applyStatus(s) {
+  Object.assign(view, { running: s.running, nextAt: s.nextAt, lastGap: s.lastGap });
+  render();
+}
 
 function showResult(r) {
   view.result = r;
@@ -636,11 +701,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     });
     return true; // async reply
   }
-  if (msg.type === 'result') showResult(msg.r); // checked by another tab
-  if (msg.type === 'status') {
-    Object.assign(view, { running: msg.running, nextAt: msg.nextAt, isWatcher: msg.watcher });
-    render();
-  }
+  if (msg.type === 'status') applyStatus(msg);
   if (msg.type === 'found') startFlash();
   if (msg.type === 'ack') stopFlash();
   if (msg.type === 'reload') location.reload();
@@ -650,5 +711,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   models = listModels(document.documentElement.innerHTML);
   await pickFromUrl();
   await initPanel();
-  chrome.runtime.sendMessage({ type: 'hello' });
+  const status = await chrome.runtime.sendMessage({ type: 'hello', family }).catch(() => null);
+  if (status) applyStatus(status);
+  sendPrefs();
 })();
