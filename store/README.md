@@ -25,7 +25,7 @@ Built for people who just need one phone, without paying for an alert service:
 • Each tab is its own watch: watch two models in two tabs
 • Keeps your Mac awake while watching and tells you if checks were paused by sleep
 • Backs off by itself if Apple rate-limits, and recovers
-• Optional, quiet problem warnings (at most once an hour, never by voice)
+• Optional warning if checking stops working (a notification, never a spoken alarm, at most once an hour)
 • English and 中文
 
 Works on apple.com stores in the US, Canada and other regions that offer in-store pickup.
