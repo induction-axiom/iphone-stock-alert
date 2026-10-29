@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Duo Watch 本地报警助手（只用 Python 标准库）。
+"""Duo Watch Mac alarm helper (Python standard library only).
 
-- 收到扩展的 /alert：把音量开到最大、循环响警报 + 中文语音、弹出对话框，直到你点"我知道了"
-- 运行期间阻止 Mac 睡眠（caffeinate，屏幕可以黑）
-- 看门狗：扩展超过 2 分钟没动静，或 5 分钟没成功查到一次库存，就语音提醒你
+- On /alert from the extension: volume to max, siren + spoken alert on a loop and a dialog,
+  until you click the dialog button
+- Keeps the Mac from idle-sleeping while it runs (caffeinate; the display may still sleep)
+- Watchdog: speaks up if the extension goes quiet for 90s, or no check has worked for 5 minutes
 
-用法：
-  python3 duo_alarm.py            # 正常运行
-  python3 duo_alarm.py --test     # 立刻试一次真实警报（很响！）
-  python3 duo_alarm.py --dry-run  # 只打印动作，不出声，用来调试
+Usage:
+  python3 duo_alarm.py              # run it
+  python3 duo_alarm.py --test       # fire a real alarm now (loud!); add --zh for Chinese
+  python3 duo_alarm.py --dry-run    # print what it would do, no sound
 
-可选环境变量：
-  NTFY_TOPIC=一串随机字符   同时推送到手机上的 ntfy App（最高优先级）
+Optional environment variable:
+  NTFY_TOPIC=some-random-string     also push to the ntfy app on your phone (max priority)
+
+Voice and dialogs follow the language picked in the extension panel (EN / 中).
 """
 import json
 import os
@@ -25,13 +28,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = 8765
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 DRY_RUN = "--dry-run" in sys.argv
-PING_STALE_S = 120
+PING_STALE_S = 90  # the extension pings at least every 30s while running
 OK_STALE_S = 300
 WARN_EVERY_S = 900
 ALARM_MAX_S = 15 * 60
 
+TEXT = {
+    "en": {
+        "speak": "iPhone Duo is in stock! Go buy it now!",
+        "button": "Got it",
+        "title": "iPhone Duo in stock",
+        "stalled": "Stock monitor stopped. The Chrome extension has been silent for 90 seconds.",
+        "blocked": "Stock monitor has not had a successful check in 5 minutes. Apple may be blocking it.",
+        "test_title": "Duo Watch test",
+        "test_message": "This is a test alarm: Apple Somewhere — Available Today",
+    },
+    "zh": {
+        "speak": "iPhone Duo 有货了！快去下单！",
+        "button": "我知道了",
+        "title": "iPhone Duo 有货了",
+        "stalled": "库存监控停了，Chrome 扩展已经一分半没有动静，去看一下",
+        "blocked": "库存监控已经五分钟没有成功查到库存，可能被 Apple 暂时限制了",
+        "test_title": "Duo Watch 测试",
+        "test_message": "这是测试警报：Apple 某某店 Available Today",
+    },
+}
+
 lock = threading.Lock()
-state = {"last_ping": None, "last_ok": None, "first_ping": None, "last_error": "", "last_warn": 0, "stopped": False}
+state = {"last_ping": None, "last_ok": None, "first_ping": None, "last_error": "", "last_warn": 0, "stopped": False, "lang": "en"}
 alarm_stop = None  # threading.Event while an alarm is ringing
 
 
@@ -53,22 +77,28 @@ def osa(script):
     return run(["osascript", "-e", script])
 
 
-def chinese_voice():
+def pick_voices():
     if DRY_RUN:
-        return "Tingting"
-    names = [
-        line.split("(")[0].split("  ")[0].strip()
-        for line in subprocess.run(["say", "-v", "?"], capture_output=True, text=True).stdout.splitlines()
-        if "zh_CN" in line
-    ]
-    return "Tingting" if "Tingting" in names else (names[0] if names else None)
+        return {"en": "Samantha", "zh": "Tingting"}
+    voices = {}
+    for line in subprocess.run(["say", "-v", "?"], capture_output=True, text=True).stdout.splitlines():
+        name = line.split("(")[0].split("  ")[0].strip()
+        for lang, locale, preferred in (("zh", "zh_CN", "Tingting"), ("en", "en_US", "Samantha")):
+            if locale in line and (lang not in voices or name == preferred):
+                voices[lang] = name
+    return voices
 
 
-VOICE = chinese_voice()
+VOICES = pick_voices()
 
 
-def speak(text):
-    run(["say", "-v", VOICE, text] if VOICE else ["say", "iPhone Duo in stock"])
+def lang_of(value):
+    return "zh" if value == "zh" else "en"
+
+
+def speak(text, lang):
+    voice = VOICES.get(lang)
+    run(["say", "-v", voice, text] if voice else ["say", text])
 
 
 def push_phone(title, message, url):
@@ -84,17 +114,18 @@ def push_phone(title, message, url):
         req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(body).encode(), method="POST")
         urllib.request.urlopen(req, timeout=10)
     except Exception as e:
-        log("ntfy 推送失败：", e)
+        log("ntfy push failed:", e)
 
 
-def alarm(title, message, url):
+def alarm(title, message, url, lang):
     global alarm_stop
     with lock:
         if alarm_stop and not alarm_stop.is_set():
-            log("警报已经在响，忽略重复的 /alert")
+            log("Alarm already ringing, ignoring duplicate /alert")
             return
         alarm_stop = stop = threading.Event()
-    log("🚨 有货！", message.replace("\n", " | "))
+    text = TEXT[lang]
+    log("🚨 IN STOCK:", message.replace("\n", " | "))
 
     old_volume = osa("output volume of (get volume settings)")
     old_muted = osa("output muted of (get volume settings)")
@@ -107,10 +138,10 @@ def alarm(title, message, url):
     def dialog():
         safe = message.replace("\\", "\\\\").replace('"', '\\"')
         btn = osa(
-            f'display dialog "{safe}" with title "{title}" buttons {{"我知道了"}} '
+            f'display dialog "{safe}" with title "{title}" buttons {{"{text["button"]}"}} '
             f'default button 1 with icon caution giving up after {ALARM_MAX_S}'
         )
-        log("对话框关闭：", btn or "(超时)")
+        log("Dialog closed:", btn or "(timed out)")
         stop.set()
 
     threading.Thread(target=dialog, daemon=True).start()
@@ -121,7 +152,7 @@ def alarm(title, message, url):
             run(["afplay", "/System/Library/Sounds/Sosumi.aiff"])
         if stop.is_set():
             break
-        speak("iPhone Duo 有货了！快去下单！")
+        speak(text["speak"], lang)
         if DRY_RUN:
             stop.wait(2)
 
@@ -130,7 +161,7 @@ def alarm(title, message, url):
         osa(f"set volume output volume {old_volume}")
     if old_muted == "true":
         osa("set volume with output muted")
-    log("警报结束")
+    log("Alarm finished")
 
 
 def ack():
@@ -141,28 +172,37 @@ def ack():
     run(["pkill", "-f", "display dialog"], wait=True)
 
 
-def warn(text):
+def warn(key):
     now = time.time()
     if now - state["last_warn"] < WARN_EVERY_S:
         return
     state["last_warn"] = now
+    lang = state["lang"]
+    text = TEXT[lang][key]
     log("⚠️", text)
     osa(f'display notification "{text}" with title "Duo Watch" sound name "Basso"')
-    speak(text)
+    speak(text, lang)
 
 
 def watchdog():
+    last_tick = time.time()
+    grace_until = 0
     while True:
         time.sleep(30)
+        now = time.time()
+        if now - last_tick > 90:
+            # The 30s sleep took far longer, so the Mac was asleep. Give Chrome time to catch up.
+            log(f"Mac just woke up (slept ~{int((now - last_tick) / 60)} min); no watchdog warnings for 3 minutes")
+            grace_until = now + 180
+        last_tick = now
         with lock:
             s = dict(state)
-        if s["stopped"] or not s["first_ping"]:
+        if s["stopped"] or not s["first_ping"] or now < grace_until:
             continue
-        now = time.time()
         if now - s["last_ping"] > PING_STALE_S:
-            warn("库存监控停了，Chrome 扩展已经两分钟没有动静，去看一下")
+            warn("stalled")
         elif now - (s["last_ok"] or s["first_ping"]) > OK_STALE_S:
-            warn("库存监控已经五分钟没有成功查到库存，可能被 Apple 暂时限制了")
+            warn("blocked")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -189,10 +229,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
             return self._json(400, {"error": "bad json"})
+        lang = lang_of(body.get("lang"))
 
         if self.path == "/ping":
             now = time.time()
             with lock:
+                state["lang"] = lang
                 state["stopped"] = bool(body.get("stopped"))
                 state["last_ping"] = now
                 state["first_ping"] = state["first_ping"] or now
@@ -203,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
                     state["last_error"] = body["error"]
             return self._json(200, {"ok": True})
         if self.path == "/alert":
-            args = (str(body.get("title", "iPhone Duo 有货了")), str(body.get("message", "")), str(body.get("url", "")))
+            args = (str(body.get("title") or TEXT[lang]["title"]), str(body.get("message", "")), str(body.get("url", "")), lang)
             threading.Thread(target=alarm, args=args, daemon=True).start()
             return self._json(200, {"ok": True})
         if self.path == "/ack":
@@ -218,15 +260,16 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     if "--test" in sys.argv:
-        alarm("Duo Watch 测试", "这是测试警报：Apple Store 某某店 Available Today", "")
+        lang = "zh" if "--zh" in sys.argv else "en"
+        alarm(TEXT[lang]["test_title"], TEXT[lang]["test_message"], "", lang)
         return
     if not DRY_RUN:
         # -i: no idle sleep, -s: no system sleep on AC power, -m: no disk sleep. Display may still sleep.
         subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
     threading.Thread(target=watchdog, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    log(f"Duo Watch 助手已启动：http://127.0.0.1:{PORT}  语音={VOICE}  手机推送={'开' if NTFY_TOPIC else '关'}")
-    log("保持这个窗口开着。Ctrl+C 退出。")
+    log(f"Duo Watch helper running on http://127.0.0.1:{PORT}  voices={VOICES}  phone push={'on' if NTFY_TOPIC else 'off'}")
+    log("Keep this window open. Ctrl+C to quit.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

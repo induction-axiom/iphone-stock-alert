@@ -8,15 +8,15 @@ assert.strictEqual(regionPrefix('/ca/shop/buy-iphone/iphone-duo'), '/ca');
 assert.strictEqual(regionPrefix('/ca-fr/shop/buy-iphone/iphone-duo'), '/ca-fr');
 
 const html =
-  '{"sku":"MK1G4","partNumber":"MK1G4LL/A","price":{"fullPrice":2199.00},"category":"iphone","name":"iPhone Duo 512GB Star White"},' +
-  '{"sku":"MK1E4","partNumber":"MK1E4LL/A","price":{"fullPrice":1999.00},"category":"iphone","name":"iPhone Duo 256GB Star White"}';
-assert.strictEqual(findPart(html, 'iPhone Duo 256GB Star White'), 'MK1E4LL/A');
-assert.strictEqual(findPart(html, 'iPhone Duo 2TB Star White'), null);
+  '{"partNumber":"MK1G4LL/A","footNotes":{"a":"b"},"dimensionCapacity":"512gb","dimensionColor":"starwhite"},' +
+  '{"partNumber":"MK1E4LL/A","seoUrlToken":"x","dimensionCapacity":"256gb","carrierModel":"ATT","dimensionColor":"starwhite"}';
+assert.strictEqual(findPart(html, '256gb', 'starwhite'), 'MK1E4LL/A');
+assert.strictEqual(findPart(html, '2tb', 'starwhite'), null);
 
-if (process.argv[2]) {
-  const page = fs.readFileSync(process.argv[2], 'utf8');
-  console.log('real page 256GB Star White ->', findPart(page, 'iPhone Duo 256GB Star White'));
-  console.log('real page 2TB Night Sky    ->', findPart(page, 'iPhone Duo 2TB Night Sky'));
+// node extension/test.js page1.html page2.html ... prints what each saved buy page resolves to
+for (const file of process.argv.slice(2)) {
+  const page = fs.readFileSync(file, 'utf8');
+  console.log(file.split('/').pop(), '256gb starwhite ->', findPart(page, '256gb', 'starwhite'), '| 2tb nightsky ->', findPart(page, '2tb', 'nightsky'));
 }
 
 const us = availabilityUrl('', 'MK1E4LL/A', '95014');

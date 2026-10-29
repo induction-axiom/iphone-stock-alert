@@ -1,50 +1,64 @@
-# Duo Watch：iPhone Duo 门店取货库存提醒（自用）
+# Duo Watch
 
-两部分：
+Get a loud alarm the moment an **iPhone Duo (256GB, Star White)** becomes available for in-store pickup near you.
 
-- `extension/`：Chrome 扩展。在你自己的 apple.com 页面里，用你自己的浏览器会话，大约每 10 秒（±2 秒随机）查一次附近门店能不能取货。
-- `helper/duo_alarm.py`：Mac 本地报警助手。有货时把音量开到最大，循环播放警报和中文语音并弹窗，直到你点"我知道了"。它运行期间 Mac 不会自动睡眠，扩展一出问题它会用语音提醒你。
+It runs in **your own Chrome tab** on apple.com, the same way you'd check the page by hand, about every 10 seconds. A small Mac helper makes the alarm hard to miss.
 
-## 1. 启动报警助手（先做）
+> Personal tool, not affiliated with Apple. Apple can change or block its stock check at any time.
+
+## What you get
+
+- A floating panel on the Apple page: live status, every nearby store, draggable, light/dark, **EN / 中文** switch (English by default)
+- When stock shows up: Mac volume to max + siren + spoken alert + a dialog that stays until you click it, a Chrome notification, and an optional push to your phone
+- A spoken warning if monitoring stops or Apple starts blocking it
+
+## Setup (5 minutes)
+
+**1. Start the alarm helper** and leave the window open:
 
 ```bash
-python3 helper/duo_alarm.py --test   # 先试一次，确认够响（点"我知道了"停止）
-python3 helper/duo_alarm.py          # 正式运行，保持这个终端窗口开着
+python3 helper/duo_alarm.py
 ```
 
-想让手机也收到推送：在手机上装 ntfy App，订阅一个只有你知道的随机主题名，然后：
+Try the alarm first with `python3 helper/duo_alarm.py --test` (it's loud; click **Got it** to stop).
+
+**2. Load the extension**
+
+1. Open `chrome://extensions` and turn on **Developer mode**
+2. Click **Load unpacked** and pick the `extension` folder
+
+**3. Start watching**
+
+1. Open the iPhone Duo buy page for your country, for example [US](https://www.apple.com/shop/buy-iphone/iphone-duo) or [Canada](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
+2. In the panel, open **Settings**, enter your postal/ZIP code, then click **Start watching**
+3. Drag that tab into its own window and leave it open (not minimized)
+
+## Keep it running
+
+- **Don't close the lid.** A sleeping Mac checks nothing. The helper already prevents idle sleep (the screen can go dark). If you need the lid closed, run `sudo pmset -a disablesleep 1`, and undo it later with `sudo pmset -a disablesleep 0`.
+- **Stop Chrome from pausing the tab.** In `chrome://settings/performance`, add `apple.com` to *Always keep these sites active* and turn off *Energy Saver*.
+- **Survive closing Terminal:**
+  ```bash
+  tmux new -d -s duo 'while true; do python3 helper/duo_alarm.py; sleep 5; done'
+  ```
+
+## Phone alerts (optional)
+
+Install the [ntfy](https://ntfy.sh) app, subscribe to a random topic name only you know, then start the helper with:
 
 ```bash
-NTFY_TOPIC=duo-你自己的随机字符串 python3 helper/duo_alarm.py
+NTFY_TOPIC=your-random-topic python3 helper/duo_alarm.py
 ```
 
-## 2. 安装扩展
+## Troubleshooting
 
-1. Chrome 打开 `chrome://extensions`，打开右上角"开发者模式"
-2. 点"加载已解压的扩展程序"，选择 `extension` 文件夹
-3. 打开你所在地区的 iPhone Duo 购买页：
-   - 美国：https://www.apple.com/shop/buy-iphone/iphone-duo
-   - 加拿大：https://www.apple.com/ca/shop/buy-iphone/iphone-duo
-4. 页面右下角会出现 Duo Watch 面板：填邮编，型号会自动识别（256GB Star White），然后点"开始监控"
-5. 把这个标签页拖成单独一个窗口，放着不用管（不要最小化）。Chrome 的"节能模式"建议关掉
+| You see | What it means |
+|---|---|
+| `HTTP 541` | Apple is temporarily blocking checks. The extension backs off by itself (up to 5 minutes between checks) and recovers. |
+| "Couldn't find the part number" | Enter it by hand in Settings (the US part is `MK1E4LL/A`). |
+| "Unrecognized response format" | Apple changed its response. Open DevTools → Console and look for `[Duo Watch] raw response`. |
+| "Mac alarm not running" | Start `helper/duo_alarm.py`. Without it you only get the Chrome notification. |
 
-扩展图标上的小字表示状态：`OK` 正常，`ERR` 出错正在退避重试，`!!!` 有货。
+**Want a different model?** Change `TARGET` at the top of `extension/content.js` (for example `capacity: '512gb', color: 'nightsky'`), then reload the extension.
 
-## 有货时会发生什么
-
-- Mac：音量调到 100 并取消静音，循环播放警报和语音"iPhone Duo 有货了"，弹窗，自动打开购买页
-- Chrome：系统通知（不点不消失），窗口跳到最前面，页面标题和面板红白闪烁
-- 手机：如果设置了 ntfy，会收到最高优先级推送
-- 点弹窗里的"我知道了"或面板上的"停止报警"即可停止。同一家店不会重复报警
-
-## 常见问题
-
-**token/cookie 过期怎么办？** 这个接口不需要登录。Apple 用的是反爬 cookie，扩展每 30 分钟自动刷新一次页面来更新它们。连续 3 次失败也会自动刷新。出错时按 20 秒、40 秒、80 秒……最多 5 分钟的间隔退避重试，恢复后回到 10 秒。
-
-**合上盖子怎么办？** Mac 一睡眠，什么都会停。助手已经阻止了"闲置睡眠"（屏幕可以黑），但合盖仍然会睡。可以选：
-
-- 不合盖，屏幕亮度调到最低（最简单）
-- 接电源 + 外接显示器，合盖进入"合盖模式"
-- 自己在终端运行 `sudo pmset -a disablesleep 1`，合盖也不睡；用完一定要改回来：`sudo pmset -a disablesleep 0`。注意不要合盖放进包里，会过热
-
-**看到 HTTP 541？** 那是 Apple 的反爬限制。扩展会自动退避。如果 5 分钟都没成功，助手会语音提醒你。
+**Tests:** `node extension/test.js`

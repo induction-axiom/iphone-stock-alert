@@ -6,12 +6,17 @@
     return m ? '/' + m[1] : '';
   }
 
-  // Finds the part number for e.g. "iPhone Duo 256GB Star White" in the buy page's embedded JSON.
-  function findPart(html, productName) {
-    const name = productName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp('"partNumber":"([A-Z0-9]+/A)"[^{}]*?(?:\\{[^{}]*\\}[^{}]*?)?"name":"' + name + '"');
-    const m = html.match(re);
-    return m ? m[1] : null;
+  // Finds the part number for e.g. capacity "256gb" + color "starwhite" in the buy page's embedded
+  // JSON. Matches on Apple's dimension keys, which are the same in every country and language.
+  function findPart(html, capacity, color) {
+    for (const chunk of html.split('{"partNumber":"').slice(1)) {
+      const part = chunk.slice(0, chunk.indexOf('"'));
+      if (!/^[A-Z0-9]+\/A$/.test(part)) continue;
+      const cap = chunk.match(/"dimensionCapacity":"([^"]*)"/);
+      const col = chunk.match(/"dimensionColor":"([^"]*)"/);
+      if (cap && col && cap[1] === capacity && col[1] === color) return part;
+    }
+    return null;
   }
 
   function availabilityUrl(prefix, part, postal) {
@@ -34,9 +39,9 @@
   // Turns Apple's fulfillment-messages JSON into a flat list of stores.
   function parseAvailability(data, part) {
     const content = data && data.body && data.body.content;
-    if (!content) throw new Error('响应格式不认识（没有 body.content）');
+    if (!content) throw Object.assign(new Error('Unrecognized response (no body.content)'), { code: 'badShape' });
     const pm = content.pickupMessage || {};
-    if (!pm.stores && pm.errorMessage) throw new Error('Apple 返回：' + pm.errorMessage);
+    if (!pm.stores && pm.errorMessage) throw Object.assign(new Error(pm.errorMessage), { code: 'apple' });
 
     const stores = (pm.stores || []).map((s) => {
       const pa = (s.partsAvailability || {})[part] || {};
