@@ -8,12 +8,13 @@ const familyLabel = family ? familyName(family) : 'iPhone';
 let models = [];
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 let lang = 'en';
-const view = { running: false, ringing: false, result: null, checkedAt: null, nextAt: null };
+// lastOk is the latest successful result; result is the latest check, which may have failed.
+const view = { running: false, ringing: false, result: null, lastOk: null, checkedAt: null, okAt: null, nextAt: null, editing: false, testNote: null };
 
 const STRINGS = {
   en: {
-    noPostal: 'Enter your postal code in Settings first',
-    noModel: 'Pick a model in Settings first',
+    noPostal: 'Enter your postal code first',
+    noModel: 'Pick a model first',
     network: (m) => 'Network error: ' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? ': temporarily blocked by Apple' : ''),
     notJson: 'Response was not JSON (probably blocked)',
@@ -26,32 +27,36 @@ const STRINGS = {
     starting: 'Starting…',
     failing: "Can't check right now",
     none: 'Not in stock yet',
-    noModelYet: 'no model picked',
-    last: (t) => `Last ${t}`,
+    ago: (s) => (s < 5 ? 'just now' : s < 60 ? `${s}s ago` : `${Math.floor(s / 60)} min ago`),
+    checked: (a) => `Checked ${a}`,
+    lastGood: (a) => `Last good check ${a}`,
+    noGood: 'No successful check yet',
     never: 'Not checked yet',
     next: (n) => ` · next in ${n}s`,
+    retry: (n) => ` · retrying in ${n}s`,
+    watching: 'Watching',
     alerts: 'Alerts',
-    chChrome: 'Chrome notification',
-    chChromeHint: 'Pops up and brings this tab to the front',
-    chChromeHelp: "Didn't see it? In macOS System Settings → Notifications → Google Chrome, allow notifications (and turn off Focus).",
-    notSet: 'Not set',
-    allOff: 'All off',
+    edit: 'Edit',
+    done: 'Done',
+    notSet: 'Pick a model and postal code',
     short: { chrome: 'Chrome', voice: 'Voice', phone: 'Phone' },
+    hint: {
+      chrome: 'Chrome notification: pops up and brings this tab to the front',
+      voice: "Say it out loud: repeats until you stop it. Keep your Mac's volume up.",
+      phone: 'Phone push: free ntfy app, max priority',
+    },
+    test: 'Test',
+    testResult: (list) => `Test sent: ${list}.`,
+    chromeHelp: 'No notification? Allow Google Chrome in macOS System Settings → Notifications, and turn off Focus.',
+    phoneHow: 'Install the free ntfy app, tap +, and subscribe to this topic:',
     fine: 'Checks only while this tab is open and your Mac is awake. Closing the lid or quitting Chrome pauses it.',
     gap: (m, at) => `Paused ${m} min (Mac asleep or Chrome paused) · resumed ${at}`,
     dismiss: 'Dismiss',
-    chVoice: 'Say it out loud',
-    chVoiceSub: "Repeats until you stop it. Keep your Mac's volume up.",
-    chPhone: 'Push to my phone',
-    chPhoneSub: 'Free ntfy app, max priority',
-    chPhoneHint: 'Install the free ntfy app, tap +, and subscribe to this topic:',
     copy: 'Copy',
     copied: 'Copied',
-    test: 'Test',
     yes: 'Available',
     no: 'None',
     delivery: (d) => `Ship to home: ${d}`,
-    settings: 'Settings',
     postal: 'Postal / ZIP code',
     model: 'Model',
     choose: 'Choose…',
@@ -62,8 +67,8 @@ const STRINGS = {
     collapse: 'Collapse / expand',
   },
   zh: {
-    noPostal: '请先在设置里填邮编',
-    noModel: '请先在设置里选机型',
+    noPostal: '请先填邮编',
+    noModel: '请先选机型',
     network: (m) => '网络错误：' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? '，被 Apple 暂时限制' : ''),
     notJson: '返回的不是 JSON（可能被限制）',
@@ -76,32 +81,36 @@ const STRINGS = {
     starting: '正在开始…',
     failing: '暂时查不到',
     none: '暂时没货',
-    noModelYet: '未选机型',
-    last: (t) => `上次 ${t}`,
+    ago: (s) => (s < 5 ? '刚刚' : s < 60 ? `${s} 秒前` : `${Math.floor(s / 60)} 分钟前`),
+    checked: (a) => `${a}检查`,
+    lastGood: (a) => `上次成功：${a}`,
+    noGood: '还没有成功查过',
     never: '还没查过',
     next: (n) => ` · ${n} 秒后再查`,
-    alerts: '提醒方式',
-    chChrome: 'Chrome 通知',
-    chChromeHint: '弹出通知，并把这个页面切到最前面',
-    chChromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知（并关掉专注模式）。',
-    notSet: '未设置',
-    allOff: '全部关闭',
+    retry: (n) => ` · ${n} 秒后重试`,
+    watching: '监控',
+    alerts: '提醒',
+    edit: '修改',
+    done: '完成',
+    notSet: '请选机型、填邮编',
     short: { chrome: 'Chrome', voice: '语音', phone: '手机' },
+    hint: {
+      chrome: 'Chrome 通知：弹出通知，并把这个页面切到最前面',
+      voice: '语音播报：一直重复，直到你点停止。请把 Mac 音量调大。',
+      phone: '推送到手机：免费的 ntfy App，最高优先级',
+    },
+    test: '测试',
+    testResult: (list) => `已发送测试：${list}。`,
+    chromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知，并关掉专注模式。',
+    phoneHow: '安装免费的 ntfy App，点 +，订阅这个主题：',
     fine: '只在这个页面开着、Mac 醒着时检查。合上盖子或退出 Chrome 会暂停。',
     gap: (m, at) => `暂停了 ${m} 分钟（Mac 睡眠或 Chrome 被暂停）· ${at} 已恢复`,
     dismiss: '关闭',
-    chVoice: '语音播报',
-    chVoiceSub: '一直重复，直到你点停止。请把 Mac 音量调大。',
-    chPhone: '推送到手机',
-    chPhoneSub: '免费的 ntfy App，最高优先级',
-    chPhoneHint: '安装免费的 ntfy App，点 +，订阅这个主题：',
     copy: '复制',
     copied: '已复制',
-    test: '测试',
     yes: '可取货',
     no: '无货',
     delivery: (d) => `网上订购送货：${d}`,
-    settings: '设置',
     postal: '邮编',
     model: '机型',
     choose: '请选择…',
@@ -250,10 +259,42 @@ root.innerHTML = `
   .lang button:not(.on):hover { color: var(--blue); }
   .body { padding: 0 14px 14px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
   .collapsed .body { display: none; }
-  .headline { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 2px 0 2px; }
-  .sub { color: var(--muted); font-size: 12px; }
-  .meta { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0 8px; color: var(--muted); font-size: 12px; }
-  .stores { border-top: 1px solid var(--line); max-height: 220px; overflow: auto; }
+  .headline { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 2px 0 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+
+  .status { margin: 10px 0; padding: 2px 10px; border-radius: 12px; background: var(--chip); }
+  .srow { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 12px; }
+  .srow + .srow, .fields + .srow, .howto + .srow { border-top: 1px solid var(--line); }
+  .srow .k { width: 50px; flex: none; color: var(--muted); align-self: flex-start; padding-top: 7px; }
+  .srow .v { flex: 1; min-width: 0; padding: 6px 0; line-height: 1.4; }
+  .srow .v.unset { color: var(--amber); }
+  button.link { all: unset; color: var(--blue); font-weight: 600; font-size: 12px; cursor: pointer; padding: 2px 4px; margin-right: -4px; border-radius: 6px; align-self: flex-start; margin-top: 5px; }
+  .code button.link { align-self: center; margin-top: 0; }
+  button.link:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
+  .toggles { display: flex; flex-wrap: wrap; gap: 4px; }
+  button.tog { all: unset; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; cursor: pointer;
+               color: var(--muted); border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent); }
+  button.tog:hover { border-color: var(--blue); color: var(--blue); }
+  button.tog[aria-pressed="true"] { color: #fff; border-color: var(--blue); background: var(--blue); }
+  button.tog[aria-pressed="true"]:hover { color: #fff; filter: brightness(1.08); }
+
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 2px 0 10px; }
+  .wide { grid-column: 1 / -1; }
+  label { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
+  input, select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--bg);
+                  color: var(--fg); font-size: 13px; border: 1px solid var(--line); }
+  input:hover, select:hover { border-color: color-mix(in srgb, var(--fg) 25%, transparent); }
+  select { cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+           background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 24px; }
+  select option { color: #1d1d1f; }
+  input:focus, select:focus { border-color: var(--blue); }
+  .howto { padding: 0 0 8px; color: var(--muted); font-size: 11px; }
+  .howto a { color: var(--blue); }
+  .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 5px 5px 5px 8px; border-radius: 8px; background: var(--bg); }
+  .code code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); word-break: break-all; }
+
+  .stores { border-top: 1px solid var(--line); max-height: 220px; overflow: auto; transition: opacity .2s; }
+  .stores.stale { opacity: .5; }
   .row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
   .row .name { flex: 1; min-width: 0; }
   .row .name b { font-weight: 500; }
@@ -263,45 +304,10 @@ root.innerHTML = `
   .pill.yes { background: var(--green); color: #fff; }
   .note { margin-top: 8px; color: var(--muted); font-size: 12px; }
   .err { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--fg); font-size: 12px; }
-  details { border-top: 1px solid var(--line); }
-  .meta + .stores, .note + details, .err + details { margin-top: 0; }
-  summary { display: flex; align-items: center; gap: 6px; padding: 9px 0; cursor: pointer; list-style: none;
-            font-size: 12px; font-weight: 500; color: var(--fg); }
-  summary::-webkit-details-marker { display: none; }
-  summary .peek { flex: 1; min-width: 0; text-align: right; color: var(--muted); font-weight: 400;
-                  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  summary::after { content: '›'; color: var(--muted); font-size: 15px; line-height: 1; transition: transform .15s; }
-  details[open] > summary::after { transform: rotate(90deg); }
-  summary:hover, summary:hover::after { color: var(--blue); }
-  details[open] > summary { padding-bottom: 4px; }
-  details > :last-child { margin-bottom: 10px; }
-  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .wide { grid-column: 1 / -1; }
-  label { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
-  input:not([type=checkbox]), select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
-          color: var(--fg); font-size: 13px; border: 1px solid var(--line); }
-  input:not([type=checkbox]):hover, select:hover { border-color: color-mix(in srgb, var(--fg) 25%, transparent); }
-  select { cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-           background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 24px; }
-  select option { color: #1d1d1f; }
-  input:focus, select:focus { border-color: var(--blue); }
-  .ch { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
-  .ch + .ch, .howto + .ch { border-top: 1px solid var(--line); }
-  button.check { all: unset; display: flex; align-items: flex-start; gap: 8px; flex: 1; cursor: pointer; color: var(--fg); font-size: 13px; }
-  button.check small { display: block; color: var(--muted); font-size: 11px; }
-  .tick { width: 14px; height: 14px; margin-top: 2px; flex: none; border-radius: 4px; border: 1.5px solid color-mix(in srgb, var(--fg) 40%, transparent);
-          display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
-  .check[aria-checked="true"] .tick { background: var(--blue); border-color: var(--blue); }
-  .check[aria-checked="true"] .tick::after { content: '✓'; }
-  .check:hover .tick { border-color: var(--blue); }
-  .card.flash { animation: pulse 1s ease-in-out 3; border-color: var(--red); }
-  button.chip { all: unset; padding: 2px 9px; border-radius: 7px; border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
-                 color: var(--blue); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-  button.chip:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
-  .howto { margin: 0 0 8px 23px; color: var(--muted); font-size: 11px; }
-  .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 6px 6px 6px 8px; border-radius: 8px; background: var(--chip); }
-  .code code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); word-break: break-all; }
-  .howto a { color: var(--blue); }
+  .gap { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 7px 8px 7px 10px; border-radius: 10px;
+         background: var(--chip); color: var(--fg); font-size: 12px; }
+  .gap span { flex: 1; }
+
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   button.btn { all: unset; flex: 1; text-align: center; padding: 8px 12px; border-radius: 10px; font-weight: 600; cursor: pointer; }
   .btn.primary { background: var(--blue); color: #fff; }
@@ -309,10 +315,7 @@ root.innerHTML = `
   .btn.danger { background: var(--red); color: #fff; }
   .btn:hover { filter: brightness(1.08); }
   .fine { margin-top: 8px; color: var(--muted); font-size: 11px; text-align: center; }
-  .gap { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 7px 8px 7px 10px; border-radius: 10px;
-         background: var(--chip); color: var(--fg); font-size: 12px; }
-  .gap span { flex: 1; }
-  button:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
+  button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
   [hidden] { display: none !important; }
 
   .card[data-state="ok"] .dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
@@ -320,6 +323,7 @@ root.innerHTML = `
   .card[data-state="found"] { border-color: var(--red); animation: pulse 1s ease-in-out infinite; }
   .card[data-state="found"] .dot { background: var(--red); }
   .card[data-state="found"] .headline { color: var(--red); }
+  .card.flash { animation: pulse 1s ease-in-out 3; border-color: var(--red); }
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--red) 45%, transparent), 0 12px 40px rgba(0,0,0,.18); } }
   .running .dot { animation: breathe 2s ease-in-out infinite; }
   @keyframes breathe { 50% { opacity: .45; } }
@@ -333,40 +337,34 @@ root.innerHTML = `
   </div>
   <div class="body">
     <div class="headline"></div>
-    <div class="sub"></div>
-    <div class="meta"><span data-v="times"></span></div>
-    <div class="stores"></div>
-    <div class="note" data-v="delivery"></div>
-    <div class="err" data-v="error" hidden></div>
-    <div class="gap" data-v="gap" hidden><span data-v="gapText"></span><button class="icon" data-a="dismissGap">×</button></div>
-    <details>
-      <summary><span data-t="settings"></span><span class="peek" data-v="settingsPeek"></span></summary>
-      <div class="fields">
+    <div class="meta" data-v="times"></div>
+    <div class="status">
+      <div class="srow">
+        <span class="k" data-t="watching"></span><span class="v" data-v="watchText"></span>
+        <button class="link" data-a="edit"></button>
+      </div>
+      <div class="fields" data-v="fields" hidden>
         <label class="wide"><span data-t="model"></span><select data-k="model"></select></label>
         <label class="wide" data-v="manual" hidden><span data-t="part"></span><input data-k="manualPart" placeholder="MK1E4LL/A"></label>
         <label><span data-t="postal"></span><input data-k="postal" placeholder="95014 / M5V 3L9"></label>
       </div>
-    </details>
-    <details data-v="alerts">
-      <summary><span data-t="alerts"></span><span class="peek" data-v="alertsPeek"></span></summary>
-      <div class="ch">
-        <button class="check" role="checkbox" data-ch="chrome"><span class="tick"></span><span><span data-t="chChrome"></span><small data-t="chChromeHint"></small></span></button>
-        <button class="chip" data-test="chrome" data-t="test"></button>
+      <div class="srow">
+        <span class="k" data-t="alerts"></span>
+        <span class="v toggles">
+          <button class="tog" data-ch="chrome"></button><button class="tog" data-ch="voice"></button><button class="tog" data-ch="phone"></button>
+        </span>
+        <button class="link" data-a="test" data-t="test"></button>
       </div>
-      <div class="howto" data-v="chromeHelp" data-t="chChromeHelp" hidden></div>
-      <div class="ch">
-        <button class="check" role="checkbox" data-ch="voice"><span class="tick"></span><span><span data-t="chVoice"></span><small data-t="chVoiceSub"></small></span></button>
-        <button class="chip" data-test="voice" data-t="test"></button>
-      </div>
-      <div class="ch">
-        <button class="check" role="checkbox" data-ch="phone"><span class="tick"></span><span><span data-t="chPhone"></span><small data-t="chPhoneSub"></small></span></button>
-        <button class="chip" data-test="phone" data-t="test"></button>
-      </div>
+      <div class="howto" data-v="testNote" hidden></div>
       <div class="howto" data-v="phoneHow" hidden>
-        <span data-t="chPhoneHint"></span> <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a>
-        <div class="code"><code data-v="topic"></code><button class="chip" data-copy="topic" data-t="copy"></button></div>
+        <span data-t="phoneHow"></span> <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a>
+        <div class="code"><code data-v="topic"></code><button class="link" data-copy="topic" data-t="copy"></button></div>
       </div>
-    </details>
+    </div>
+    <div class="stores"></div>
+    <div class="note" data-v="delivery"></div>
+    <div class="err" data-v="error" hidden></div>
+    <div class="gap" data-v="gap" hidden><span data-v="gapText"></span><button class="icon" data-a="dismissGap">×</button></div>
     <div class="actions">
       <button class="btn primary" data-a="toggle"></button>
       <button class="btn danger" data-a="ack" data-t="ack" hidden></button>
@@ -382,7 +380,8 @@ for (const type of ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
 const $ = (s) => root.querySelector(s);
 const card = $('.card');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const clock = (ts) => new Date(ts).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const clock = (ts) => new Date(ts).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+const ago = (ts) => t('ago', Math.max(0, Math.round((Date.now() - ts) / 1000)));
 
 async function render() {
   const c = await getConfig();
@@ -391,55 +390,74 @@ async function render() {
   root.querySelectorAll('[data-lang]').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang));
   $('[data-a=collapse]').title = t('collapse');
 
+  // Status: what is being watched and how alerts are set, always visible.
+  const model = currentModel(c);
+  const what = model ? modelLabel(model) : !models.length && c.manualPart ? c.manualPart : null;
+  const ready = !!(what && c.postal);
+  $('[data-v=watchText]').textContent = ready ? `${familyLabel} ${what} · ${c.postal}` : t('notSet');
+  $('[data-v=watchText]').classList.toggle('unset', !ready);
+  const editing = view.editing || !ready;
+  $('[data-v=fields]').hidden = !editing;
+  $('[data-a=edit]').textContent = editing ? t('done') : t('edit');
+  $('[data-a=edit]').hidden = editing && !ready;
+  renderModelOptions(model);
+  $('[data-v=manual]').hidden = models.length > 0;
+
+  for (const [k, on] of Object.entries(c.channels)) {
+    const b = $(`[data-ch=${k}]`);
+    b.textContent = t('short')[k];
+    b.title = t('hint')[k];
+    b.setAttribute('aria-pressed', String(on));
+  }
+  $('[data-v=phoneHow]').hidden = !c.channels.phone;
+  $('[data-v=topic]').textContent = c.ntfyTopic || '';
+  $('[data-v=testNote]').hidden = !view.testNote;
+  if (view.testNote) {
+    const list = view.testNote.map(([k, ok]) => `${t('short')[k]} ${ok ? '✓' : '✗'}`).join(' · ');
+    $('[data-v=testNote]').textContent = t('testResult', list) + (view.testNote.some(([k]) => k === 'chrome') ? ' ' + t('chromeHelp') : '');
+  }
+
+  // Result: shows the latest good check; a failed check dims it rather than hiding it.
   const r = view.result;
-  const found = r && r.ok ? r.stores.filter((s) => s.available) : [];
-  const state = found.length || view.ringing ? 'found' : !view.running ? 'idle' : r && !r.ok ? 'error' : r ? 'ok' : 'idle';
-  card.dataset.state = state;
+  const failed = r && !r.ok;
+  const ok = view.lastOk;
+  const found = ok ? ok.stores.filter((s) => s.available) : [];
+  card.dataset.state = found.length || view.ringing ? 'found' : !view.running ? 'idle' : failed ? 'error' : ok ? 'ok' : 'idle';
   card.classList.toggle('running', view.running);
 
   let headline;
   if (found.length) headline = t('found', found.length);
-  else if (!view.running) headline = t('paused');
-  else if (!r) headline = t('starting');
-  else if (!r.ok) headline = t('failing');
-  else headline = t('none');
+  else if (!view.running && !ok) headline = t('paused');
+  else if (failed) headline = t('failing');
+  else if (!ok) headline = t('starting');
+  else headline = view.running ? t('none') : `${t('none')} · ${t('paused')}`;
   $('.headline').textContent = headline;
   $('.mini').textContent = headline;
-  const model = currentModel(c);
-  const what = model ? modelLabel(model) : !models.length && c.manualPart ? c.manualPart : t('noModelYet');
-  $('.sub').textContent = `${familyLabel} · ${what}${c.postal ? ' · ' + c.postal : ''}`;
-  renderModelOptions(model);
-  $('[data-v=manual]').hidden = models.length > 0;
 
-  const left = view.nextAt ? Math.max(0, Math.round((view.nextAt - Date.now()) / 1000)) : null;
-  $('[data-v=times]').textContent =
-    (view.checkedAt ? t('last', clock(view.checkedAt)) : t('never')) + (view.running && left != null ? t('next', left) : '');
+  const left = view.running && view.nextAt ? Math.max(0, Math.round((view.nextAt - Date.now()) / 1000)) : null;
+  let times;
+  if (failed) times = view.okAt ? t('lastGood', ago(view.okAt)) : t('noGood');
+  else times = view.okAt ? t('checked', ago(view.okAt)) : t('never');
+  if (left != null) times += failed ? t('retry', left) : t('next', left);
+  $('[data-v=times]').textContent = times;
 
-  for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).setAttribute('aria-checked', String(on));
-  const enabled = Object.keys(c.channels).filter((k) => c.channels[k]);
-  $('[data-v=alertsPeek]').textContent = enabled.length ? enabled.map((k) => t('short')[k]).join(' · ') : t('allOff');
-  $('[data-v=settingsPeek]').textContent = model && c.postal ? `${c.postal}` : t('notSet');
+  $('[data-v=error]').hidden = !failed;
+  if (failed) $('[data-v=error]').textContent = t(...r.err);
+  $('.stores').innerHTML = ok
+    ? ok.stores
+        .map(
+          (s) => `<div class="row"><div class="name"><b>${esc(s.name)}</b><small>${esc(s.quote || s.display)}</small></div>
+            <span class="dist">${esc(s.distance)}</span><span class="pill ${s.available ? 'yes' : ''}">${s.available ? t('yes') : t('no')}</span></div>`
+        )
+        .join('')
+    : '';
+  $('.stores').hidden = !(ok && ok.stores.length);
+  $('.stores').classList.toggle('stale', !!failed);
+  $('[data-v=delivery]').textContent = ok && ok.delivery ? t('delivery', ok.delivery) : '';
+
   $('[data-v=gap]').hidden = !c.lastGap;
   if (c.lastGap) $('[data-v=gapText]').textContent = t('gap', c.lastGap.minutes, clock(c.lastGap.at));
   $('[data-a=dismissGap]').title = t('dismiss');
-  $('[data-v=chromeHelp]').hidden = !view.chromeTested;
-  $('[data-v=phoneHow]').hidden = !c.channels.phone;
-  $('[data-v=topic]').textContent = c.ntfyTopic || '';
-
-  const showError = r && !r.ok;
-  $('[data-v=error]').hidden = !showError;
-  if (showError) $('[data-v=error]').textContent = t(...r.err);
-  $('.stores').innerHTML =
-    r && r.ok
-      ? r.stores
-          .map(
-            (s) => `<div class="row"><div class="name"><b>${esc(s.name)}</b><small>${esc(s.quote || s.display)}</small></div>
-              <span class="dist">${esc(s.distance)}</span><span class="pill ${s.available ? 'yes' : ''}">${s.available ? t('yes') : t('no')}</span></div>`
-          )
-          .join('')
-      : '';
-  $('.stores').hidden = !(r && r.ok && r.stores.length);
-  $('[data-v=delivery]').textContent = r && r.ok && r.delivery ? t('delivery', r.delivery) : '';
 
   $('[data-a=toggle]').textContent = view.running ? t('stop') : t('start');
   $('[data-a=toggle]').className = 'btn ' + (view.running ? 'secondary' : 'primary');
@@ -466,7 +484,6 @@ async function initPanel() {
   view.running = !!c.running;
   $('[data-k=postal]').value = c.postal || '';
   $('[data-k=manualPart]').value = c.manualPart || '';
-  if (!c.postal || !currentModel(c)) $('details').open = true;
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
   render();
   setInterval(() => view.running && render(), 1000);
@@ -475,7 +492,7 @@ async function initPanel() {
 const randomTopic = () =>
   'iphone-alert-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => (b % 36).toString(36)).join('');
 
-// Opening Settings or Alerts makes the panel taller; nudge a dragged panel back inside the window.
+// Editing settings makes the panel taller; nudge a dragged panel back inside the window.
 function keepInView() {
   if (host.style.top) {
     const r = host.getBoundingClientRect();
@@ -520,6 +537,7 @@ root.addEventListener('change', async (e) => {
   if (k === 'model') {
     await chrome.storage.local.set({ target: v ? { family, key: v } : null });
     chrome.runtime.sendMessage({ type: 'reset' }); // a new model deserves fresh alerts
+    view.lastOk = null;
   } else {
     await chrome.storage.local.set({ [k]: v });
   }
@@ -540,24 +558,8 @@ root.addEventListener('click', async (e) => {
     const update = { channels: { ...c.channels, [ch]: on } };
     if (ch === 'phone' && on && !c.ntfyTopic) update.ntfyTopic = randomTopic();
     await chrome.storage.local.set(update);
+    view.testNote = null;
     return render();
-  }
-  const testBtn = e.target.closest('[data-test]');
-  if (testBtn) {
-    const channel = testBtn.dataset.test;
-    testBtn.textContent = '…';
-    if (channel === 'chrome') {
-      // The OS can hide the notification, so the panel also shows the test itself.
-      view.chromeTested = true;
-      card.classList.remove('flash');
-      void card.offsetWidth;
-      card.classList.add('flash');
-      setTimeout(() => card.classList.remove('flash'), 3200);
-    }
-    const ok = await chrome.runtime.sendMessage({ type: 'test', channel }).catch(() => false);
-    testBtn.textContent = ok ? '✓' : '✗';
-    if (channel === 'chrome') render();
-    return;
   }
   const copyBtn = e.target.closest('[data-copy]');
   if (copyBtn) {
@@ -573,6 +575,19 @@ root.addEventListener('click', async (e) => {
     if (!view.running) view.nextAt = null;
     await chrome.storage.local.set({ running: view.running });
     chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop' });
+  } else if (a === 'edit') {
+    view.editing = !view.editing;
+  } else if (a === 'test') {
+    // Tests every alert that's on. The OS can hide notifications, so the panel flashes too.
+    const c = await getConfig();
+    const on = Object.keys(c.channels).filter((k) => c.channels[k]);
+    card.classList.remove('flash');
+    void card.offsetWidth;
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 3200);
+    view.testNote = await Promise.all(
+      on.map(async (k) => [k, await chrome.runtime.sendMessage({ type: 'test', channel: k }).catch(() => false)])
+    );
   } else if (a === 'ack') {
     stopFlash();
     chrome.runtime.sendMessage({ type: 'ack' });
@@ -590,6 +605,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     check().then((r) => {
       view.result = r;
       view.checkedAt = Date.now();
+      if (r.ok) {
+        view.lastOk = r;
+        view.okAt = view.checkedAt;
+      }
       render();
       reply(r);
     });

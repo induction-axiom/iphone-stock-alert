@@ -23,13 +23,13 @@ A small panel sits on Apple's own buy page and checks nearby stores about every 
 1. Download this repo (**Code → Download ZIP**, then unzip)
 2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `extension` folder
 3. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
-4. In the panel: **Settings** → pick a model and enter your postal code; **Alerts** → choose how to be alerted; then **Start watching**
+4. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
 
 Leave that tab open in its own window. Any store Apple lists near your postal code counts, and the panel shows how far each one is.
 
 ## Alerts
 
-Choose any combination in the panel. Each one has a **Test** button. Nothing to install: it's all in the extension.
+Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, and **Test** to try the ones that are on. Nothing to install: it's all in the extension.
 
 <p align="center">
   <picture>
