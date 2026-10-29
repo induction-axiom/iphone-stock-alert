@@ -260,6 +260,14 @@ async function tick(tabId) {
   sendStatus(tabId, updated);
 }
 
+// The panel's "Clear Apple cookies" button: what clearing apple.com site data by hand does.
+async function clearAppleCookies() {
+  const cookies = await chrome.cookies.getAll({ url: 'https://www.apple.com/' });
+  await Promise.all(
+    cookies.map((c) => chrome.cookies.remove({ url: 'https://' + c.domain.replace(/^\./, '') + c.path, name: c.name, storeId: c.storeId }))
+  );
+}
+
 async function forget(tabId) {
   unschedule(tabId);
   await updateWatch(tabId, null);
@@ -301,6 +309,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     updateWatch(tabId, { alerted: [], fails: 0, model: null }).then((w) => w && w.running && schedule(tabId, 1_000));
   } else if (msg.type === 'prefs' && tabId != null) {
     updateWatch(tabId, { lang: msg.lang, channels: msg.channels, warn: msg.warn });
+  } else if (msg.type === 'clearCookies' && tabId != null) {
+    clearAppleCookies().then(async () => {
+      if (await getWatch(tabId)) await updateWatch(tabId, { fails: 0, failingSince: null, lastReloadAt: Date.now() });
+      chrome.tabs.reload(tabId).catch(() => {});
+    });
   } else if (msg.type === 'dismissGap' && tabId != null) {
     updateWatch(tabId, { lastGap: null });
   } else if (msg.type === 'ack') {

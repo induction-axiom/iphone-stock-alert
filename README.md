@@ -60,7 +60,7 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 
 | You see | Do this |
 |---|---|
-| `HTTP 541` | Nothing. Apple is rate-limiting; checks slow down (up to 5 minutes apart) and recover by themselves. |
+| `HTTP 541` | Usually nothing: Apple is rate-limiting, and checks slow down (up to 5 minutes apart) and recover by themselves. If it lasts for hours, Apple may have flagged this browser: click **Clear Apple cookies and retry** in the panel (this signs you out of apple.com). |
 | The model list is empty | Apple changed its page. Please [open an issue](https://github.com/induction-axiom/pickup-alert-for-iphone/issues). |
 | "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[Pickup Alert for iPhone] raw response`. |
 | The voice test is silent | Turn the Mac's volume up and Mute off. |

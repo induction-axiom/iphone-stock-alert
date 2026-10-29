@@ -57,11 +57,12 @@ Watches Apple Store in-store pickup availability for the iPhone model the user p
 | Permission | Justification |
 |---|---|
 | `notifications` | Shows the in-stock alert (and optional problem warnings) as a Chrome notification. |
+| `cookies` | Only when the user clicks "Clear Apple cookies and retry" in the panel after Apple keeps blocking checks: removes the browser's apple.com cookies, the same as clearing apple.com site data in Chrome settings, then reloads the page. |
 | `storage` | Remembers the user's last postal code and phone push topic, and keeps each tab's watch state while the tab is open. |
 | `alarms` | A 30-second watchdog that restarts checking if Chrome suspended the extension's service worker. |
 | `tts` | Speaks the in-stock alert out loud with the computer's built-in voice, if the user turned on Voice. |
 | `power` | Keeps the computer from sleeping only while a watch is running, so checks don't stop overnight. Released when watching stops. |
-| Host `https://www.apple.com/*` | Runs the panel on Apple's iPhone buy pages and requests Apple's store-pickup availability for the chosen model from the user's own tab. |
+| Host `https://*.apple.com/*` | Runs the panel on Apple's iPhone buy pages and requests Apple's store-pickup availability for the chosen model from the user's own tab. The wildcard covers apple.com cookies set for the whole domain, which the user can choose to clear. |
 | Host `https://ntfy.sh/*` | Sends the in-stock alert to the user's phone through ntfy, only if the user turned on Phone. |
 
 **Remote code:** No, I am not using remote code.

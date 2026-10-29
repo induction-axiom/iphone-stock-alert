@@ -18,6 +18,8 @@ const STRINGS = {
     network: (m) => 'Network error: ' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? ': temporarily blocked by Apple' : ''),
     notJson: 'Response was not JSON (probably blocked)',
+    clearCookies: 'Clear Apple cookies and retry',
+    clearCookiesHint: 'If Apple keeps blocking this browser, a fresh start often helps. Signs you out of apple.com.',
     badShape: 'Unrecognized response format',
     apple: (m) => 'Apple says: ' + m,
     flashA: '🚨 IN STOCK!',
@@ -78,6 +80,8 @@ const STRINGS = {
     network: (m) => '网络错误：' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? '，被 Apple 暂时限制' : ''),
     notJson: '返回的不是 JSON（可能被限制）',
+    clearCookies: '清除 Apple cookie 并重试',
+    clearCookiesHint: '如果 Apple 一直限制这个浏览器，清除后重来通常有用。apple.com 会被登出。',
     badShape: '响应格式不认识',
     apple: (m) => 'Apple 返回：' + m,
     flashA: '🚨 有货！有货！',
@@ -400,7 +404,10 @@ root.innerHTML = `
     </div>
     <div class="stores"></div>
     <div class="note" data-v="delivery"></div>
-    <div class="err" data-v="error" hidden></div>
+    <div class="err" data-v="error" hidden>
+      <span data-v="errText"></span>
+      <div data-v="blocked" hidden><span class="hintv" data-t="clearCookiesHint"></span> <button class="link" data-a="clearCookies" data-t="clearCookies"></button></div>
+    </div>
     <div class="gap" data-v="gap" hidden><span data-v="gapText"></span><button class="icon" data-a="dismissGap">×</button></div>
     <div class="actions">
       <button class="btn primary" data-a="toggle"></button>
@@ -482,7 +489,8 @@ async function render() {
   $('[data-v=times]').textContent = times;
 
   $('[data-v=error]').hidden = !failed;
-  if (failed) $('[data-v=error]').textContent = t(...r.err);
+  if (failed) $('[data-v=errText]').textContent = t(...r.err);
+  $('[data-v=blocked]').hidden = !(failed && (r.status === 541 || r.err[0] === 'notJson'));
   $('.stores').innerHTML = ok
     ? ok.stores
         .map(
@@ -642,6 +650,9 @@ root.addEventListener('click', async (e) => {
   } else if (a === 'newTopic') {
     view.badTopic = false;
     await chrome.storage.local.set({ ntfyTopic: randomTopic() });
+  } else if (a === 'clearCookies') {
+    btn.disabled = true;
+    return chrome.runtime.sendMessage({ type: 'clearCookies' }); // the tab reloads, and a running watch carries on
   } else if (a === 'dismissGap') {
     view.lastGap = null;
     chrome.runtime.sendMessage({ type: 'dismissGap' });

@@ -1,17 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Pickup Alert for iPhone",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Watches Apple Store pickup stock for the iPhone you pick, from your own browser, and alarms when it's in stock.",
   "permissions": [
     "notifications",
     "storage",
+    "cookies",
     "alarms",
     "tts",
     "power"
   ],
   "host_permissions": [
-    "https://www.apple.com/*",
+    "https://*.apple.com/*",
     "https://ntfy.sh/*"
   ],
   "background": {

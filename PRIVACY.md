@@ -1,6 +1,6 @@
 # Privacy Policy: Pickup Alert for iPhone
 
-_Last updated: October 28, 2026_
+_Last updated: October 29, 2026_
 
 Pickup Alert for iPhone has no server and no account. The developer receives no data from it.
 
@@ -16,6 +16,8 @@ On your computer only:
 - **Kept per tab until the tab closes:** the model, alert choices and panel position for that tab.
 
 Nothing is synced or sent to the developer.
+
+If Apple keeps blocking checks, the panel offers a **Clear Apple cookies and retry** button. Only when you click it, the extension deletes the apple.com cookies in your browser (as clearing apple.com site data in Chrome settings would, which signs you out of apple.com) and reloads the page. It never reads or sends their contents.
 
 ## What leaves your computer
 
