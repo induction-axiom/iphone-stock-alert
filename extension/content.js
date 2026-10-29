@@ -39,6 +39,8 @@ const STRINGS = {
     alerts: 'Alerts',
     chChrome: 'Chrome notification',
     chChromeHint: 'Pops up and brings this tab to the front',
+    chChromeHelp: "Didn't see it? In macOS System Settings → Notifications → Google Chrome, allow notifications (and turn off Focus).",
+    chMacSub: 'Needs one command in Terminal',
     chMac: 'Loud alarm on this Mac',
     chMacHint: 'Max volume, spoken alert, keeps going until you click. Paste this into Terminal and leave it open:',
     chPhone: 'Push to my phone',
@@ -84,6 +86,8 @@ const STRINGS = {
     alerts: '提醒方式',
     chChrome: 'Chrome 通知',
     chChromeHint: '弹出通知，并把这个页面切到最前面',
+    chChromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知（并关掉专注模式）。',
+    chMacSub: '需要在终端运行一条命令',
     chMac: 'Mac 大声报警',
     chMacHint: '音量开到最大、语音循环播报，点了才停。把这条命令粘贴到终端运行，并保持窗口开着：',
     chPhone: '推送到手机',
@@ -189,6 +193,17 @@ function unlockAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
+function beepOnce() {
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.frequency.value = 880;
+  g.gain.value = 0.3;
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.2);
+}
+
 function startSiren() {
   if (siren) return;
   view.ringing = true;
@@ -290,9 +305,14 @@ root.innerHTML = `
   input:focus, select:focus { border-color: var(--blue); }
   .ch { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
   .ch + .ch, .howto + .ch { border-top: 1px solid var(--line); }
-  label.check { display: flex; align-items: flex-start; gap: 8px; flex: 1; cursor: pointer; color: var(--fg); font-size: 13px; }
-  label.check input { accent-color: var(--blue); width: 15px; height: 15px; margin: 2px 0 0; flex: none; cursor: pointer; }
-  label.check small { display: block; color: var(--muted); font-size: 11px; }
+  button.check { all: unset; display: flex; align-items: flex-start; gap: 8px; flex: 1; cursor: pointer; color: var(--fg); font-size: 13px; }
+  button.check small { display: block; color: var(--muted); font-size: 11px; }
+  .tick { width: 14px; height: 14px; margin-top: 2px; flex: none; border-radius: 4px; border: 1.5px solid var(--muted);
+          display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+  .check[aria-checked="true"] .tick { background: var(--blue); border-color: var(--blue); }
+  .check[aria-checked="true"] .tick::after { content: '✓'; }
+  .check:focus-visible .tick { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .card.flash { animation: pulse 1s ease-in-out 3; border-color: var(--red); }
   button.chip { all: unset; padding: 3px 9px; border-radius: 7px; background: var(--chip); color: var(--fg); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   button.chip:hover { filter: brightness(.95); }
   .howto { margin: 0 0 8px 23px; color: var(--muted); font-size: 11px; }
@@ -341,11 +361,12 @@ root.innerHTML = `
     <details data-v="alerts">
       <summary data-t="alerts"></summary>
       <div class="ch">
-        <label class="check"><input type="checkbox" data-ch="chrome"><span><span data-t="chChrome"></span><small data-t="chChromeHint"></small></span></label>
+        <button class="check" role="checkbox" data-ch="chrome"><span class="tick"></span><span><span data-t="chChrome"></span><small data-t="chChromeHint"></small></span></button>
         <button class="chip" data-test="chrome" data-t="test"></button>
       </div>
+      <div class="howto" data-v="chromeHelp" data-t="chChromeHelp" hidden></div>
       <div class="ch">
-        <label class="check"><input type="checkbox" data-ch="mac"><span><span data-t="chMac"></span><small data-v="macStatus"></small></span></label>
+        <button class="check" role="checkbox" data-ch="mac"><span class="tick"></span><span><span data-t="chMac"></span><small data-v="macStatus"></small></span></button>
         <button class="chip" data-test="mac" data-t="test"></button>
       </div>
       <div class="howto" data-v="macHow" hidden>
@@ -353,7 +374,7 @@ root.innerHTML = `
         <div class="code"><code data-v="macCmd"></code><button class="chip" data-copy="macCmd" data-t="copy"></button></div>
       </div>
       <div class="ch">
-        <label class="check"><input type="checkbox" data-ch="phone"><span><span data-t="chPhone"></span><small data-t="chPhoneSub"></small></span></label>
+        <button class="check" role="checkbox" data-ch="phone"><span class="tick"></span><span><span data-t="chPhone"></span><small data-t="chPhoneSub"></small></span></button>
         <button class="chip" data-test="phone" data-t="test"></button>
       </div>
       <div class="howto" data-v="phoneHow" hidden>
@@ -368,6 +389,10 @@ root.innerHTML = `
   </div>
 </div>`;
 document.documentElement.appendChild(host);
+// Apple's page has its own document-level handlers; events inside the panel stay inside it.
+for (const type of ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keyup', 'keypress', 'input', 'change']) {
+  host.addEventListener(type, (e) => e.stopPropagation());
+}
 const $ = (s) => root.querySelector(s);
 const card = $('.card');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -405,9 +430,10 @@ async function render() {
     (view.checkedAt ? t('last', clock(view.checkedAt)) : t('never')) + (view.running && left != null ? t('next', left) : '');
 
   view.channels = c.channels;
-  for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).checked = on;
-  $('[data-v=macStatus]').textContent = c.channels.mac ? (view.helperOk ? t('helperOn') : t('helperOff')) : '';
+  for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).setAttribute('aria-checked', String(on));
+  $('[data-v=macStatus]').textContent = c.channels.mac ? (view.helperOk ? t('helperOn') : t('helperOff')) : t('chMacSub');
   $('[data-v=macStatus]').style.color = c.channels.mac ? (view.helperOk ? 'var(--green)' : 'var(--amber)') : '';
+  $('[data-v=chromeHelp]').hidden = !view.chromeTested;
   $('[data-v=macHow]').hidden = !(c.channels.mac && !view.helperOk);
   $('[data-v=macCmd]').textContent = HELPER_CMD;
   $('[data-v=phoneHow]').hidden = !c.channels.phone;
@@ -502,15 +528,6 @@ $('[data-drag]').addEventListener('pointerdown', (e) => {
 });
 
 root.addEventListener('change', async (e) => {
-  const ch = e.target.dataset && e.target.dataset.ch;
-  if (ch) {
-    const c = await getConfig();
-    const update = { channels: { ...c.channels, [ch]: e.target.checked } };
-    if (ch === 'phone' && e.target.checked && !c.ntfyTopic) update.ntfyTopic = randomTopic();
-    await chrome.storage.local.set(update);
-    if (ch === 'mac') refreshHelper();
-    return render();
-  }
   const k = e.target.dataset && e.target.dataset.k;
   if (!k) return;
   const v = e.target.value.trim();
@@ -530,11 +547,33 @@ root.addEventListener('click', async (e) => {
     await chrome.storage.local.set({ lang: langBtn.dataset.lang });
     return render();
   }
+  const toggle = e.target.closest('[data-ch]');
+  if (toggle) {
+    const ch = toggle.dataset.ch;
+    const c = await getConfig();
+    const on = !c.channels[ch];
+    const update = { channels: { ...c.channels, [ch]: on } };
+    if (ch === 'phone' && on && !c.ntfyTopic) update.ntfyTopic = randomTopic();
+    await chrome.storage.local.set(update);
+    if (ch === 'mac') refreshHelper();
+    return render();
+  }
   const testBtn = e.target.closest('[data-test]');
   if (testBtn) {
+    const channel = testBtn.dataset.test;
     testBtn.textContent = '…';
-    const ok = await chrome.runtime.sendMessage({ type: 'test', channel: testBtn.dataset.test }).catch(() => false);
+    if (channel === 'chrome') {
+      // The OS can hide the notification, so the panel also shows the test itself.
+      view.chromeTested = true;
+      card.classList.remove('flash');
+      void card.offsetWidth;
+      card.classList.add('flash');
+      setTimeout(() => card.classList.remove('flash'), 3200);
+      beepOnce();
+    }
+    const ok = await chrome.runtime.sendMessage({ type: 'test', channel }).catch(() => false);
     testBtn.textContent = ok ? '✓' : '✗';
+    if (channel === 'chrome') render();
     return;
   }
   const copyBtn = e.target.closest('[data-copy]');

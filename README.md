@@ -3,9 +3,15 @@
 Pick the iPhone you want and get alerted the moment it's available for in-store pickup near you.
 
 <p align="center">
-  <img src="docs/watching-light.png" width="320" alt="Panel while watching, light theme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/watching-dark.png">
+    <img src="docs/watching-light.png" width="320" alt="Panel while watching">
+  </picture>
   &nbsp;
-  <img src="docs/in-stock-dark.png" width="320" alt="Panel when the iPhone is in stock, dark theme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/in-stock-dark.png">
+    <img src="docs/in-stock-light.png" width="320" alt="Panel when the iPhone is in stock">
+  </picture>
 </p>
 
 A small panel sits on Apple's own buy page and checks nearby stores about every 10 seconds, from **your own Chrome tab**, the same way you'd check by hand. It works on any iPhone buy page (iPhone Duo, iPhone 18 Pro, …), in English or 中文.
@@ -26,14 +32,15 @@ Leave that tab open in its own window. Any store Apple lists near your postal co
 Choose any combination in the panel. Each one has a **Test** button, and any setup it needs is shown right there.
 
 <p align="center">
-  <img src="docs/alerts-light.png" width="320" alt="Alert options, light theme">
-  &nbsp;
-  <img src="docs/alerts-dark.png" width="320" alt="Alert options, dark theme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/alerts-dark.png">
+    <img src="docs/alerts-light.png" width="320" alt="Alert options">
+  </picture>
 </p>
 
 | Alert | What happens | Setup |
 |---|---|---|
-| **Chrome notification** (on by default) | A notification that stays until clicked; the tab jumps to the front | None |
+| **Chrome notification** (on by default) | A notification that stays until clicked; the tab jumps to the front | None. If nothing pops up, allow Google Chrome in macOS System Settings → Notifications |
 | **Loud alarm on this Mac** | Volume to max, a spoken alert on repeat, a dialog that stays until you click it. It also warns you out loud if monitoring stops | Paste the one-line command from the panel into Terminal |
 | **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel |
 

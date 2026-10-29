@@ -97,7 +97,7 @@ async function testChannel(channel) {
   const message = zh ? '这是一条测试提醒，到货时会是这样。' : 'This is a test. A real alert looks like this.';
   if (channel === 'chrome') {
     notifyChrome(title, message);
-    return true;
+    return new Promise((done) => chrome.notifications.getPermissionLevel((level) => done(level === 'granted')));
   }
   if (channel === 'mac') return helper('/alert', { title, model: 'iPhone', message, url: '' });
   if (channel === 'phone') return topic ? pushPhone(topic, title, message, '') : false;
