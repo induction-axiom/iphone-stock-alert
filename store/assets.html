@@ -19,8 +19,11 @@
   #marquee h1 { font-size: 72px; line-height: 1.05; font-weight: 700; letter-spacing: -1.5px; }
   #marquee p { margin-top: 22px; font-size: 30px; line-height: 1.35; opacity: .9; }
 
-  #alerts { width: 1280px; height: 800px; padding: 0 90px; align-items: center; gap: 60px; background: #ececee; color: #1d1d1f; }
-  #alerts img { flex: none; height: 680px; }
+  #alerts { width: 1280px; height: 800px; padding: 0 90px; align-items: center; gap: 60px; background: #f2f2f4; color: #1d1d1f; }
+  /* Fade the screenshot's edges into the page so its own shadow doesn't leave a box. */
+  #alerts img { flex: none; height: 680px;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(transparent, #000 8%, #000 92%, transparent);
+    -webkit-mask-composite: source-in; mask-composite: intersect; }
   #alerts h1 { font-size: 44px; line-height: 1.1; font-weight: 700; letter-spacing: -1px; }
   #alerts ul { margin-top: 30px; padding: 0; list-style: none; font-size: 22px; line-height: 1.45; color: #424245; }
   #alerts li + li { margin-top: 18px; }
@@ -59,7 +62,7 @@
       <li><b>Chrome notification</b> that stays until you click it</li>
       <li><b>Your Mac's voice</b> repeats it until you silence it</li>
       <li><b>Push to your phone</b> with the free ntfy app</li>
-      <li>Optional, quiet warnings if checking stops</li>
+      <li>Optional notice if checking stops (no spoken alarm)</li>
     </ul>
   </div>
 </section>
