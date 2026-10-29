@@ -13,10 +13,11 @@ A small panel sits on Apple's own buy page and checks nearby stores about every 
 
 ## Install
 
-1. Download **[pickup-alert-for-iphone.zip](https://github.com/induction-axiom/pickup-alert-for-iphone/releases/latest/download/pickup-alert-for-iphone.zip)** from the latest release and double-click it to unzip
-2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped `pickup-alert-for-iphone` folder
-3. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
-4. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
+1. Get it from the **[Chrome Web Store](https://chromewebstore.google.com/detail/pickup-alert-for-iphone/ckmciiajjjgcddpdghkmpbljaeaeiemk)** and click **Add to Chrome**
+2. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
+3. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
+
+<sub>Without the store: download [pickup-alert-for-iphone.zip](https://github.com/induction-axiom/pickup-alert-for-iphone/releases/latest/download/pickup-alert-for-iphone.zip), unzip it, then in `chrome://extensions` turn on **Developer mode**, click **Load unpacked** and pick the unzipped folder.</sub>
 
 Leave that tab open in its own window. Any store Apple lists near your postal code counts, and the panel shows how far each one is.
 
