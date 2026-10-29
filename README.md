@@ -65,4 +65,6 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 | "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[Pickup Alert for iPhone] raw response`. |
 | The voice test is silent | Turn the Mac's volume up and Mute off. |
 
-Developers: run tests with `node extension/test.js`; build the release zip with `scripts/package.sh`.
+Privacy: no server, no account, no analytics; see [PRIVACY.md](PRIVACY.md).
+
+Developers: run tests with `node extension/test.js`; build the release zip with `scripts/package.sh`. Chrome Web Store listing material is in [store/](store/).
