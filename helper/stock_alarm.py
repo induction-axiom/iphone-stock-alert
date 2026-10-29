@@ -6,15 +6,16 @@
 - Keeps the Mac from idle-sleeping while it runs (caffeinate; the display may still sleep)
 - Watchdog: speaks up if the extension goes quiet for 90s, or no check has worked for 5 minutes
 
-Usage:
+Run it straight from GitHub (the extension panel shows the same command):
+  curl -fsSL https://raw.githubusercontent.com/induction-axiom/iphone-stock-alert/main/helper/stock_alarm.py | python3 -
+
+Or from a checkout:
   python3 stock_alarm.py              # run it
   python3 stock_alarm.py --test       # fire a real alarm now (loud!); add --zh for Chinese
   python3 stock_alarm.py --dry-run    # print what it would do, no sound
 
-Optional environment variable:
-  NTFY_TOPIC=some-random-string     also push to the ntfy app on your phone (max priority)
-
 Voice and dialogs follow the language picked in the extension panel (EN / 中).
+Phone pushes are sent by the extension itself, not by this helper.
 """
 import json
 import os
@@ -22,11 +23,9 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8765
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 DRY_RUN = "--dry-run" in sys.argv
 PING_STALE_S = 90  # the extension pings at least every 30s while running
 OK_STALE_S = 300
@@ -101,22 +100,6 @@ def speak(text, lang):
     run(["say", "-v", voice, text] if voice else ["say", text])
 
 
-def push_phone(title, message, url):
-    if not NTFY_TOPIC:
-        return
-    body = {"topic": NTFY_TOPIC, "title": title, "message": message, "priority": 5, "tags": ["rotating_light"]}
-    if url:
-        body["click"] = url
-    if DRY_RUN:
-        log("[dry-run] ntfy", body)
-        return
-    try:
-        req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(body).encode(), method="POST")
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        log("ntfy push failed:", e)
-
-
 def alarm(title, message, url, lang, model="iPhone"):
     global alarm_stop
     with lock:
@@ -133,7 +116,6 @@ def alarm(title, message, url, lang, model="iPhone"):
     osa("set volume output volume 100")
     if url.startswith("https://www.apple.com/"):
         run(["open", url])
-    push_phone(title, message, url)
 
     def dialog():
         safe = message.replace("\\", "\\\\").replace('"', '\\"')
@@ -269,7 +251,7 @@ def main():
         subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
     threading.Thread(target=watchdog, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    log(f"iPhone Stock Alert helper running on http://127.0.0.1:{PORT}  voices={VOICES}  phone push={'on' if NTFY_TOPIC else 'off'}")
+    log(f"iPhone Stock Alert helper running on http://127.0.0.1:{PORT}  voices={VOICES}")
     log("Keep this window open. Ctrl+C to quit.")
     try:
         server.serve_forever()

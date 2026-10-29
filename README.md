@@ -1,64 +1,55 @@
 # iPhone Stock Alert
 
-Pick the iPhone you want (model, storage, color) and get a loud alarm the moment it's available for in-store pickup near you.
+Pick the iPhone you want and get alerted the moment it's available for in-store pickup near you.
 
-It runs in **your own Chrome tab** on apple.com, the same way you'd check the page by hand, about every 10 seconds. A small Mac helper makes the alarm hard to miss. It works on any iPhone buy page, such as iPhone Duo or iPhone 18 Pro.
+<p align="center">
+  <img src="docs/watching-light.png" width="320" alt="Panel while watching, light theme">
+  &nbsp;
+  <img src="docs/in-stock-dark.png" width="320" alt="Panel when the iPhone is in stock, dark theme">
+</p>
+
+A small panel sits on Apple's own buy page and checks nearby stores about every 10 seconds, from **your own Chrome tab**, the same way you'd check by hand. It works on any iPhone buy page (iPhone Duo, iPhone 18 Pro, …), in English or 中文.
 
 > Personal tool, not affiliated with Apple. Apple can change or block its stock check at any time.
 
-## What you get
+## Install
 
-- A floating panel on the Apple page: pick a model, see every nearby store live; draggable, light/dark, **EN / 中文** switch (English by default)
-- When stock shows up: Mac volume to max + a repeating spoken alert + a dialog that stays until you click it, a Chrome notification, and an optional push to your phone
-- A spoken warning if monitoring stops or Apple starts blocking it
+1. Download this repo (**Code → Download ZIP**, then unzip)
+2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `extension` folder
+3. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
+4. In the panel: **Settings** → pick a model and enter your postal code; **Alerts** → choose how to be alerted; then **Start watching**
 
-## Setup (5 minutes)
+Leave that tab open in its own window. Any store Apple lists near your postal code counts, and the panel shows how far each one is.
 
-**1. Start the alarm helper** and leave the window open:
+## Alerts
 
-```bash
-python3 helper/stock_alarm.py
-```
+Choose any combination in the panel. Each one has a **Test** button, and any setup it needs is shown right there.
 
-Try the alarm first with `python3 helper/stock_alarm.py --test` (it's loud; click **Got it** to stop).
+<p align="center">
+  <img src="docs/alerts-light.png" width="320" alt="Alert options, light theme">
+  &nbsp;
+  <img src="docs/alerts-dark.png" width="320" alt="Alert options, dark theme">
+</p>
 
-**2. Load the extension**
-
-1. Open `chrome://extensions` and turn on **Developer mode**
-2. Click **Load unpacked** and pick the `extension` folder
-
-**3. Start watching**
-
-1. Open the buy page for the iPhone you want in your country, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
-2. In the panel's **Settings**, pick a **Model**, enter your postal/ZIP code, then click **Start watching**
-3. Drag that tab into its own window and leave it open (not minimized)
-
-Any store Apple lists near your postal code counts. The panel shows each store's distance.
+| Alert | What happens | Setup |
+|---|---|---|
+| **Chrome notification** (on by default) | A notification that stays until clicked; the tab jumps to the front | None |
+| **Loud alarm on this Mac** | Volume to max, a spoken alert on repeat, a dialog that stays until you click it. It also warns you out loud if monitoring stops | Paste the one-line command from the panel into Terminal |
+| **Push to my phone** | A max-priority push via the free [ntfy](https://ntfy.sh) app | Subscribe to the topic shown in the panel |
 
 ## Keep it running
 
-- **Don't close the lid.** A sleeping Mac checks nothing. The helper already prevents idle sleep (the screen can go dark). If you need the lid closed, run `sudo pmset -a disablesleep 1`, and undo it later with `sudo pmset -a disablesleep 0`.
-- **Stop Chrome from pausing the tab.** In `chrome://settings/performance`, add `apple.com` to *Always keep these sites active* and turn off *Energy Saver*.
-- **Survive closing Terminal:**
-  ```bash
-  tmux new -d -s stock 'while true; do python3 helper/stock_alarm.py; sleep 5; done'
-  ```
-
-## Phone alerts (optional)
-
-Install the [ntfy](https://ntfy.sh) app, subscribe to a random topic name only you know, then start the helper with:
-
-```bash
-NTFY_TOPIC=your-random-topic python3 helper/stock_alarm.py
-```
+- **Keep the lid open.** A sleeping Mac checks nothing. The Mac alarm keeps the Mac awake while it runs, and the screen can still turn off.
+- **Keep Chrome from pausing the tab:** in `chrome://settings/performance`, add `apple.com` to *Always keep these sites active*.
+- If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers.
 
 ## Troubleshooting
 
-| You see | What it means |
+| You see | Do this |
 |---|---|
-| `HTTP 541` | Apple is temporarily blocking checks. The extension backs off by itself (up to 5 minutes between checks) and recovers. |
-| The Model list is empty | The panel couldn't read models from this page. Enter the part number by hand (for example `MK1E4LL/A`). |
-| "Unrecognized response format" | Apple changed its response. Open DevTools → Console and look for `[iPhone Stock Alert] raw response`. |
-| "Mac alarm not running" | Start `helper/stock_alarm.py`. Without it you only get the Chrome notification. |
+| `HTTP 541` | Nothing. Apple is rate-limiting; checks slow down (up to 5 minutes apart) and recover by themselves. |
+| The model list is empty | Enter the part number by hand (for example `MK1E4LL/A`). |
+| "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[iPhone Stock Alert] raw response`. |
+| Mac alarm says "Not running yet" | Run the command from the panel in Terminal and keep that window open. |
 
-**Tests:** `node extension/test.js`
+Developers: run tests with `node extension/test.js`; the Mac alarm is `helper/stock_alarm.py` (`--test` to hear it, `--dry-run` for silent mode).

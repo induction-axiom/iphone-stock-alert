@@ -6,10 +6,13 @@ const prefix = regionPrefix(location.pathname);
 const family = familySlug(location.pathname);
 const familyLabel = family ? familyName(family) : 'iPhone';
 let models = [];
+const HELPER_CMD =
+  'curl -fsSL https://raw.githubusercontent.com/induction-axiom/iphone-stock-alert/main/helper/stock_alarm.py | python3 -';
+const DEFAULT_CHANNELS = { chrome: true, mac: false, phone: false };
 let audioCtx = null;
 let siren = null;
 let lang = 'en';
-const view = { running: false, ringing: false, result: null, checkedAt: null, nextAt: null, helperOk: null };
+const view = { running: false, ringing: false, result: null, checkedAt: null, nextAt: null, helperOk: null, channels: DEFAULT_CHANNELS };
 
 const STRINGS = {
   en: {
@@ -31,8 +34,19 @@ const STRINGS = {
     last: (t) => `Last ${t}`,
     never: 'Not checked yet',
     next: (n) => ` · next in ${n}s`,
-    helperOn: '● Mac alarm connected',
-    helperOff: '○ Mac alarm not running',
+    helperOn: '● Connected',
+    helperOff: '○ Not running yet',
+    alerts: 'Alerts',
+    chChrome: 'Chrome notification',
+    chChromeHint: 'Pops up and brings this tab to the front',
+    chMac: 'Loud alarm on this Mac',
+    chMacHint: 'Max volume, spoken alert, keeps going until you click. Paste this into Terminal and leave it open:',
+    chPhone: 'Push to my phone',
+    chPhoneSub: 'Free ntfy app, max priority',
+    chPhoneHint: 'Install the free ntfy app, tap +, and subscribe to this topic:',
+    copy: 'Copy',
+    copied: 'Copied',
+    test: 'Test',
     yes: 'Available',
     no: 'None',
     delivery: (d) => `Ship to home: ${d}`,
@@ -65,8 +79,19 @@ const STRINGS = {
     last: (t) => `上次 ${t}`,
     never: '还没查过',
     next: (n) => ` · ${n} 秒后再查`,
-    helperOn: '● Mac 报警助手已连接',
-    helperOff: '○ Mac 报警助手未运行',
+    helperOn: '● 已连接',
+    helperOff: '○ 还没运行',
+    alerts: '提醒方式',
+    chChrome: 'Chrome 通知',
+    chChromeHint: '弹出通知，并把这个页面切到最前面',
+    chMac: 'Mac 大声报警',
+    chMacHint: '音量开到最大、语音循环播报，点了才停。把这条命令粘贴到终端运行，并保持窗口开着：',
+    chPhone: '推送到手机',
+    chPhoneSub: '免费的 ntfy App，最高优先级',
+    chPhoneHint: '安装免费的 ntfy App，点 +，订阅这个主题：',
+    copy: '复制',
+    copied: '已复制',
+    test: '测试',
     yes: '可取货',
     no: '无货',
     delivery: (d) => `网上订购送货：${d}`,
@@ -87,7 +112,9 @@ const t = (key, ...args) => {
 };
 
 async function getConfig() {
-  return chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang']);
+  const c = await chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang', 'channels', 'ntfyTopic']);
+  c.channels = { ...DEFAULT_CHANNELS, ...c.channels };
+  return c;
 }
 
 const modelKey = (m) => [m.screen, m.capacity, m.color].join('|');
@@ -155,7 +182,7 @@ async function check() {
   }
 }
 
-// ---------- alarm inside the page (backup for the Mac helper) ----------
+// ---------- alarm inside the page (part of the Chrome channel) ----------
 
 function unlockAudio() {
   if (!audioCtx) audioCtx = new AudioContext();
@@ -170,8 +197,9 @@ function startSiren() {
     document.title = n++ % 2 ? t('flashA') : t('flashB');
   }, 500);
   const beep = () => {
-    // The Mac helper does the talking; the page only beeps when the helper isn't running.
-    if (view.helperOk !== false || !audioCtx || audioCtx.state !== 'running') return;
+    // When the Mac alarm is on and connected it does the talking, so the page stays quiet.
+    const macTalks = view.channels.mac && view.helperOk;
+    if (!view.channels.chrome || macTalks || !audioCtx || audioCtx.state !== 'running') return;
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = 'square';
@@ -254,12 +282,23 @@ root.innerHTML = `
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
   .wide { grid-column: 1 / -1; }
   label { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
-  input, select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
+  input:not([type=checkbox]), select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
           color: var(--fg); font-size: 13px; border: 1px solid transparent; }
   select { cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
            background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 24px; }
   select option { color: #1d1d1f; }
   input:focus, select:focus { border-color: var(--blue); }
+  .ch { display: flex; align-items: center; gap: 8px; padding: 7px 0; }
+  .ch + .ch, .howto + .ch { border-top: 1px solid var(--line); }
+  label.check { display: flex; align-items: flex-start; gap: 8px; flex: 1; cursor: pointer; color: var(--fg); font-size: 13px; }
+  label.check input { accent-color: var(--blue); width: 15px; height: 15px; margin: 2px 0 0; flex: none; cursor: pointer; }
+  label.check small { display: block; color: var(--muted); font-size: 11px; }
+  button.chip { all: unset; padding: 3px 9px; border-radius: 7px; background: var(--chip); color: var(--fg); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button.chip:hover { filter: brightness(.95); }
+  .howto { margin: 0 0 8px 23px; color: var(--muted); font-size: 11px; }
+  .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 6px 6px 6px 8px; border-radius: 8px; background: var(--chip); }
+  .code code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); word-break: break-all; }
+  .howto a { color: var(--blue); }
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   button.btn { all: unset; flex: 1; text-align: center; padding: 8px 12px; border-radius: 10px; font-weight: 600; cursor: pointer; }
   .btn.primary { background: var(--blue); color: #fff; }
@@ -287,7 +326,7 @@ root.innerHTML = `
   <div class="body">
     <div class="headline"></div>
     <div class="sub"></div>
-    <div class="meta"><span data-v="times"></span><span data-v="helper"></span></div>
+    <div class="meta"><span data-v="times"></span></div>
     <div class="stores"></div>
     <div class="note" data-v="delivery"></div>
     <div class="err" data-v="error" hidden></div>
@@ -297,6 +336,29 @@ root.innerHTML = `
         <label class="wide"><span data-t="model"></span><select data-k="model"></select></label>
         <label class="wide" data-v="manual" hidden><span data-t="part"></span><input data-k="manualPart" placeholder="MK1E4LL/A"></label>
         <label><span data-t="postal"></span><input data-k="postal" placeholder="95014 / M5V 3L9"></label>
+      </div>
+    </details>
+    <details data-v="alerts">
+      <summary data-t="alerts"></summary>
+      <div class="ch">
+        <label class="check"><input type="checkbox" data-ch="chrome"><span><span data-t="chChrome"></span><small data-t="chChromeHint"></small></span></label>
+        <button class="chip" data-test="chrome" data-t="test"></button>
+      </div>
+      <div class="ch">
+        <label class="check"><input type="checkbox" data-ch="mac"><span><span data-t="chMac"></span><small data-v="macStatus"></small></span></label>
+        <button class="chip" data-test="mac" data-t="test"></button>
+      </div>
+      <div class="howto" data-v="macHow" hidden>
+        <span data-t="chMacHint"></span>
+        <div class="code"><code data-v="macCmd"></code><button class="chip" data-copy="macCmd" data-t="copy"></button></div>
+      </div>
+      <div class="ch">
+        <label class="check"><input type="checkbox" data-ch="phone"><span><span data-t="chPhone"></span><small data-t="chPhoneSub"></small></span></label>
+        <button class="chip" data-test="phone" data-t="test"></button>
+      </div>
+      <div class="howto" data-v="phoneHow" hidden>
+        <span data-t="chPhoneHint"></span> <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy.sh</a>
+        <div class="code"><code data-v="topic"></code><button class="chip" data-copy="topic" data-t="copy"></button></div>
       </div>
     </details>
     <div class="actions">
@@ -341,8 +403,15 @@ async function render() {
   const left = view.nextAt ? Math.max(0, Math.round((view.nextAt - Date.now()) / 1000)) : null;
   $('[data-v=times]').textContent =
     (view.checkedAt ? t('last', clock(view.checkedAt)) : t('never')) + (view.running && left != null ? t('next', left) : '');
-  $('[data-v=helper]').textContent = view.helperOk == null ? '' : view.helperOk ? t('helperOn') : t('helperOff');
-  $('[data-v=helper]').style.color = view.helperOk === false ? 'var(--amber)' : '';
+
+  view.channels = c.channels;
+  for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).checked = on;
+  $('[data-v=macStatus]').textContent = c.channels.mac ? (view.helperOk ? t('helperOn') : t('helperOff')) : '';
+  $('[data-v=macStatus]').style.color = c.channels.mac ? (view.helperOk ? 'var(--green)' : 'var(--amber)') : '';
+  $('[data-v=macHow]').hidden = !(c.channels.mac && !view.helperOk);
+  $('[data-v=macCmd]').textContent = HELPER_CMD;
+  $('[data-v=phoneHow]').hidden = !c.channels.phone;
+  $('[data-v=topic]').textContent = c.ntfyTopic || '';
 
   const showError = r && !r.ok;
   $('[data-v=error]').hidden = !showError;
@@ -388,7 +457,21 @@ async function initPanel() {
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
   render();
   setInterval(() => view.running && render(), 1000);
+  setInterval(refreshHelper, 5000);
+  refreshHelper();
 }
+
+async function refreshHelper() {
+  if (!view.channels.mac) return;
+  const ok = await chrome.runtime.sendMessage({ type: 'helper?' }).catch(() => null);
+  if (ok !== view.helperOk) {
+    view.helperOk = ok;
+    render();
+  }
+}
+
+const randomTopic = () =>
+  'iphone-alert-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => (b % 36).toString(36)).join('');
 
 // Dragging by the title bar; the position is remembered across reloads.
 function placeAt(x, y) {
@@ -419,6 +502,15 @@ $('[data-drag]').addEventListener('pointerdown', (e) => {
 });
 
 root.addEventListener('change', async (e) => {
+  const ch = e.target.dataset && e.target.dataset.ch;
+  if (ch) {
+    const c = await getConfig();
+    const update = { channels: { ...c.channels, [ch]: e.target.checked } };
+    if (ch === 'phone' && e.target.checked && !c.ntfyTopic) update.ntfyTopic = randomTopic();
+    await chrome.storage.local.set(update);
+    if (ch === 'mac') refreshHelper();
+    return render();
+  }
   const k = e.target.dataset && e.target.dataset.k;
   if (!k) return;
   const v = e.target.value.trim();
@@ -437,6 +529,19 @@ root.addEventListener('click', async (e) => {
   if (langBtn) {
     await chrome.storage.local.set({ lang: langBtn.dataset.lang });
     return render();
+  }
+  const testBtn = e.target.closest('[data-test]');
+  if (testBtn) {
+    testBtn.textContent = '…';
+    const ok = await chrome.runtime.sendMessage({ type: 'test', channel: testBtn.dataset.test }).catch(() => false);
+    testBtn.textContent = ok ? '✓' : '✗';
+    return;
+  }
+  const copyBtn = e.target.closest('[data-copy]');
+  if (copyBtn) {
+    await navigator.clipboard.writeText($(`[data-v=${copyBtn.dataset.copy}]`).textContent);
+    copyBtn.textContent = t('copied');
+    return;
   }
   const btn = e.target.closest('[data-a]');
   if (!btn) return;
@@ -468,7 +573,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     return true; // async reply
   }
   if (msg.type === 'status') {
-    Object.assign(view, { running: msg.running, nextAt: msg.nextAt, helperOk: msg.helperOk });
+    Object.assign(view, { running: msg.running, nextAt: msg.nextAt });
+    if (msg.helperOk != null) view.helperOk = msg.helperOk;
     render();
   }
   if (msg.type === 'found') startSiren();
