@@ -6,17 +6,49 @@
     return m ? '/' + m[1] : '';
   }
 
-  // Finds the part number for e.g. capacity "256gb" + color "starwhite" in the buy page's embedded
-  // JSON. Matches on Apple's dimension keys, which are the same in every country and language.
-  function findPart(html, capacity, color) {
+  // "iphone-18-pro" from /shop/buy-iphone/iphone-18-pro/..., or null off a buy page.
+  function familySlug(pathname) {
+    const m = pathname.match(/\/shop\/buy-iphone\/([a-z0-9-]+)/);
+    return m ? m[1] : null;
+  }
+
+  // "iphone-18-pro" -> "iPhone 18 Pro"
+  function familyName(slug) {
+    return slug
+      .split('-')
+      .map((w) => (w === 'iphone' ? 'iPhone' : /^\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1)))
+      .join(' ');
+  }
+
+  const capacityGb = (c) => parseInt(c, 10) * (/tb$/.test(c) ? 1024 : 1);
+
+  // Every phone model in the buy page's embedded JSON, keyed on Apple's dimension values, which
+  // are the same in every country and language: {part, capacity: "256gb", color: "starwhite",
+  // screen: "6_9inch" or "", seo: "...-256gb-star-white-..."}.
+  function listModels(html) {
+    const seen = new Map();
     for (const chunk of html.split('{"partNumber":"').slice(1)) {
       const part = chunk.slice(0, chunk.indexOf('"'));
-      if (!/^[A-Z0-9]+\/A$/.test(part)) continue;
-      const cap = chunk.match(/"dimensionCapacity":"([^"]*)"/);
-      const col = chunk.match(/"dimensionColor":"([^"]*)"/);
-      if (cap && col && cap[1] === capacity && col[1] === color) return part;
+      if (!/^[A-Z0-9]+\/A$/.test(part) || seen.has(part)) continue;
+      const get = (k) => {
+        const m = chunk.match(new RegExp('"' + k + '":"([^"]*)"'));
+        return m ? m[1] : '';
+      };
+      const capacity = get('dimensionCapacity');
+      const color = get('dimensionColor');
+      if (!capacity || !color) continue;
+      seen.set(part, { part, capacity, color, screen: get('dimensionScreensize'), seo: get('seoUrlToken') });
     }
-    return null;
+    return [...seen.values()].sort(
+      (a, b) => a.screen.localeCompare(b.screen) || a.color.localeCompare(b.color) || capacityGb(a.capacity) - capacityGb(b.capacity)
+    );
+  }
+
+  // "Star White" for color "starwhite", read from an seoUrlToken like "...-256gb-star-white-att".
+  function colorFromSeo(model) {
+    const m = model.seo.match(new RegExp(model.capacity + '-([a-z-]+?)(?:-(?:att|t-mobile|verizon|unlocked|sprint))?$'));
+    if (!m || m[1].replace(/-/g, '') !== model.color) return null;
+    return m[1].split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
   }
 
   function availabilityUrl(prefix, part, postal) {
@@ -70,7 +102,7 @@
     return { location: pm.pickupLocation || '', stores, delivery };
   }
 
-  const api = { regionPrefix, findPart, availabilityUrl, parseAvailability };
+  const api = { regionPrefix, familySlug, familyName, listModels, colorFromSeo, availabilityUrl, parseAvailability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.DuoParse = api;
+  else root.StockParse = api;
 })(this);

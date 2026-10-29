@@ -1,22 +1,31 @@
 // node extension/test.js [path/to/saved-buy-page.html]
 const assert = require('assert');
 const fs = require('fs');
-const { regionPrefix, findPart, availabilityUrl, parseAvailability } = require('./parse.js');
+const { regionPrefix, familySlug, familyName, listModels, colorFromSeo, availabilityUrl, parseAvailability } = require('./parse.js');
 
 assert.strictEqual(regionPrefix('/shop/buy-iphone/iphone-duo'), '');
 assert.strictEqual(regionPrefix('/ca/shop/buy-iphone/iphone-duo'), '/ca');
 assert.strictEqual(regionPrefix('/ca-fr/shop/buy-iphone/iphone-duo'), '/ca-fr');
 
+assert.strictEqual(familySlug('/ca/shop/buy-iphone/iphone-18-pro/6.3-inch-display-256gb-black'), 'iphone-18-pro');
+assert.strictEqual(familySlug('/shop/bag'), null);
+assert.strictEqual(familyName('iphone-18-pro'), 'iPhone 18 Pro');
+assert.strictEqual(familyName('iphone-duo'), 'iPhone Duo');
+
 const html =
   '{"partNumber":"MK1G4LL/A","footNotes":{"a":"b"},"dimensionCapacity":"512gb","dimensionColor":"starwhite"},' +
-  '{"partNumber":"MK1E4LL/A","seoUrlToken":"x","dimensionCapacity":"256gb","carrierModel":"ATT","dimensionColor":"starwhite"}';
-assert.strictEqual(findPart(html, '256gb', 'starwhite'), 'MK1E4LL/A');
-assert.strictEqual(findPart(html, '2tb', 'starwhite'), null);
+  '{"partNumber":"MK1E4LL/A","seoUrlToken":"7.6-inch-display-256gb-star-white-att","dimensionCapacity":"256gb","carrierModel":"ATT","dimensionColor":"starwhite"},' +
+  '{"partNumber":"MK1E4LL/A","dimensionCapacity":"256gb","dimensionColor":"starwhite"},' +
+  '{"partNumber":"SHPG3LL/A","name":"AppleCare"}';
+const models = listModels(html);
+assert.deepStrictEqual(models.map((m) => m.part), ['MK1E4LL/A', 'MK1G4LL/A']); // deduped, sorted by size, no AppleCare
+assert.strictEqual(colorFromSeo(models[0]), 'Star White');
+assert.strictEqual(colorFromSeo(models[1]), null);
 
-// node extension/test.js page1.html page2.html ... prints what each saved buy page resolves to
+// node extension/test.js page1.html page2.html ... prints the models each saved buy page offers
 for (const file of process.argv.slice(2)) {
-  const page = fs.readFileSync(file, 'utf8');
-  console.log(file.split('/').pop(), '256gb starwhite ->', findPart(page, '256gb', 'starwhite'), '| 2tb nightsky ->', findPart(page, '2tb', 'nightsky'));
+  const found = listModels(fs.readFileSync(file, 'utf8'));
+  console.log(file.split('/').pop(), found.length, 'models:', found.slice(0, 4).map((m) => `${m.part} ${m.screen} ${m.capacity} ${m.color}`).join(' | '));
 }
 
 const us = availabilityUrl('', 'MK1E4LL/A', '95014');

@@ -33,7 +33,7 @@ async function getLang() {
 async function helper(path, body) {
   return fetch(HELPER + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Duo-Watch': '1' },
+    headers: { 'Content-Type': 'application/json', 'X-Stock-Alert': '1' },
     body: JSON.stringify({ ...body, lang: await getLang() }),
   })
     .then((r) => r.ok)
@@ -64,7 +64,7 @@ async function tick() {
   if (!s.running) return;
   if (s.tabId == null) {
     badge('?', '#888');
-    return; // waits for a 'hello' from an open iPhone Duo page
+    return; // waits for a 'hello' from an open iPhone buy page
   }
 
   let r;
@@ -84,7 +84,7 @@ async function tick() {
     await chrome.storage.local.set({ alerted: found.map((x) => x.id) });
     helperOk = await helper('/ping', { ok: true, summary: `${found.length}/${r.stores.length} stores available` });
     badge(found.length ? '!!!' : 'OK', found.length ? '#d00' : '#2a2');
-    if (fresh.length) await alertFound(fresh, s.tabId);
+    if (fresh.length) await alertFound(fresh, s.tabId, r.model);
     else if (now - (s.lastReloadAt || 0) > HEALTHY_RELOAD_MS && !found.length) await reloadTab(s.tabId);
   } else {
     fails += 1;
@@ -104,7 +104,7 @@ async function tick() {
   pushStatus(s.tabId, true, Date.now() + delay, helperOk);
 }
 
-async function alertFound(stores, tabId) {
+async function alertFound(stores, tabId, model) {
   const zh = (await getLang()) === 'zh';
   const message = stores.map((x) => `${x.name} ${x.distance} — ${x.quote}`).join('\n');
   let url = '';
@@ -117,13 +117,13 @@ async function alertFound(stores, tabId) {
   chrome.notifications.create('found-' + Date.now(), {
     type: 'basic',
     iconUrl: 'icon.png',
-    title: zh ? '🚨 iPhone Duo 有货了！快去下单' : '🚨 iPhone Duo is in stock! Go buy it',
+    title: zh ? `🚨 ${model} 有货了！快去下单` : `🚨 ${model} is in stock! Go buy it`,
     message,
     priority: 2,
     requireInteraction: true,
   });
   chrome.tabs.sendMessage(tabId, { type: 'found' }).catch(() => {});
-  helper('/alert', { title: zh ? 'iPhone Duo 有货了' : 'iPhone Duo in stock', message, url });
+  helper('/alert', { title: zh ? `${model} 有货了` : `${model} in stock`, model, message, url });
 }
 
 function badge(text, color) {
@@ -148,6 +148,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     chrome.storage.local.set({ running: false });
     badge('', '#888');
     helper('/ping', { stopped: true }).then((ok) => sender.tab && pushStatus(sender.tab.id, false, null, ok));
+  } else if (msg.type === 'reset') {
+    chrome.storage.local.set({ alerted: [], fails: 0 }).then(() => timer && schedule(1_000));
   } else if (msg.type === 'ack') {
     helper('/ack');
   }

@@ -1,9 +1,11 @@
-// Runs on the iPhone Duo buy page. Does the actual availability request (same origin, your own
+// Runs on Apple's iPhone buy pages. Does the actual availability request (same origin, your own
 // cookies) when background.js asks, and shows a draggable control panel.
-const { regionPrefix, findPart, availabilityUrl, parseAvailability } = DuoParse;
+const { regionPrefix, familySlug, familyName, listModels, colorFromSeo, availabilityUrl, parseAvailability } = StockParse;
 
-const TARGET = { capacity: '256gb', color: 'starwhite', label: '256GB · Star White' };
 const prefix = regionPrefix(location.pathname);
+const family = familySlug(location.pathname);
+const familyLabel = family ? familyName(family) : 'iPhone';
+let models = [];
 let audioCtx = null;
 let siren = null;
 let lang = 'en';
@@ -12,20 +14,20 @@ const view = { running: false, ringing: false, result: null, checkedAt: null, ne
 const STRINGS = {
   en: {
     noPostal: 'Enter your postal code in Settings first',
-    noPart: (label) => `Couldn't find the ${label} part number on this page. Enter it in Settings.`,
+    noModel: 'Pick a model in Settings first',
     network: (m) => 'Network error: ' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? ': temporarily blocked by Apple' : ''),
     notJson: 'Response was not JSON (probably blocked)',
     badShape: 'Unrecognized response format',
     apple: (m) => 'Apple says: ' + m,
     flashA: '🚨 IN STOCK!',
-    flashB: '📱 iPhone Duo in stock',
+    flashB: '📱 iPhone in stock',
     found: (n) => `In stock at ${n} store${n > 1 ? 's' : ''}!`,
     paused: 'Paused',
     starting: 'Starting…',
     failing: "Can't check right now",
     none: 'Not in stock yet',
-    partPending: 'part pending',
+    noModelYet: 'no model picked',
     last: (t) => `Last ${t}`,
     never: 'Not checked yet',
     next: (n) => ` · next in ${n}s`,
@@ -36,8 +38,9 @@ const STRINGS = {
     delivery: (d) => `Ship to home: ${d}`,
     settings: 'Settings',
     postal: 'Postal / ZIP code',
-    part: 'Part number (blank = auto)',
-    auto: 'auto',
+    model: 'Model',
+    choose: 'Choose…',
+    part: "Part number (models couldn't be read from this page)",
     start: 'Start watching',
     stop: 'Stop',
     ack: 'Silence alarm',
@@ -45,20 +48,20 @@ const STRINGS = {
   },
   zh: {
     noPostal: '请先在设置里填邮编',
-    noPart: (label) => `没在页面里找到 ${label} 的型号，请在设置里手动填写`,
+    noModel: '请先在设置里选机型',
     network: (m) => '网络错误：' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? '，被 Apple 暂时限制' : ''),
     notJson: '返回的不是 JSON（可能被限制）',
     badShape: '响应格式不认识',
     apple: (m) => 'Apple 返回：' + m,
     flashA: '🚨 有货！有货！',
-    flashB: '📱 iPhone Duo 有货',
+    flashB: '📱 iPhone 有货',
     found: (n) => `有货！${n} 家店可取`,
     paused: '已暂停',
     starting: '正在开始…',
     failing: '暂时查不到',
     none: '暂时没货',
-    partPending: '型号待识别',
+    noModelYet: '未选机型',
     last: (t) => `上次 ${t}`,
     never: '还没查过',
     next: (n) => ` · ${n} 秒后再查`,
@@ -69,8 +72,9 @@ const STRINGS = {
     delivery: (d) => `网上订购送货：${d}`,
     settings: '设置',
     postal: '邮编',
-    part: '型号（留空自动识别）',
-    auto: '自动识别',
+    model: '机型',
+    choose: '请选择…',
+    part: '型号编号（没能从页面读到机型列表）',
     start: '开始监控',
     stop: '停止监控',
     ack: '停止报警',
@@ -83,24 +87,48 @@ const t = (key, ...args) => {
 };
 
 async function getConfig() {
-  return chrome.storage.local.get(['postal', 'part', 'partPrefix', 'running', 'panelPos', 'collapsed', 'lang']);
+  return chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang']);
 }
 
-async function detectPart() {
+const modelKey = (m) => [m.screen, m.capacity, m.color].join('|');
+
+// The color name as the page shows it ("Star White"), falling back to the URL token or the raw key.
+function colorLabel(m) {
+  const input = document.querySelector(`input[value="${CSS.escape(m.color)}"]`);
+  const label = input && (input.closest('label') || (input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)));
+  const text = label && label.textContent.trim().replace(/\s+/g, ' ');
+  return (text && text.length < 30 && text) || colorFromSeo(m) || m.color;
+}
+
+function modelLabel(m) {
+  const screen = m.screen ? m.screen.replace('_', '.').replace('inch', '"') + ' · ' : '';
+  return `${screen}${m.capacity.toUpperCase()} · ${colorLabel(m)}`;
+}
+
+// The target is stored as dimension values, not a part number, because part numbers differ per
+// country (LL/A in the US, VC/A in Canada...).
+function currentModel(c) {
+  const t = c.target;
+  return (t && t.family === family && models.find((m) => modelKey(m) === t.key)) || null;
+}
+
+// First visit to a product: preselect the model in the URL, e.g. .../256gb-star-white-unlocked.
+async function pickFromUrl() {
   const c = await getConfig();
-  // Part numbers differ per country (LL/A in the US, VC/A in Canada...), so re-detect per region.
-  if (c.part && c.partPrefix === prefix) return c.part;
-  const part = findPart(document.documentElement.innerHTML, TARGET.capacity, TARGET.color);
-  if (part) await chrome.storage.local.set({ part, partPrefix: prefix });
-  return part;
+  if (currentModel(c)) return;
+  const path = location.pathname.replace(/[^a-z0-9]/g, '');
+  const m = models.find((x) => path.includes(x.capacity + x.color) && (!x.screen || path.includes(x.screen.replace(/[^a-z0-9]/g, ''))));
+  if (m) await chrome.storage.local.set({ target: { family, key: modelKey(m) } });
 }
 
 // Results keep an error key plus arguments, so switching language re-renders them correctly.
 async function check() {
   const c = await getConfig();
   if (!c.postal) return { ok: false, err: ['noPostal'] };
-  const part = (c.partPrefix === prefix && c.part) || (await detectPart());
-  if (!part) return { ok: false, err: ['noPart', TARGET.label] };
+  const model = currentModel(c);
+  const part = model ? model.part : !models.length && c.manualPart;
+  if (!part) return { ok: false, err: ['noModel'] };
+  const name = model ? `${familyLabel} ${modelLabel(model)}` : `${familyLabel} ${part}`;
 
   let res;
   try {
@@ -120,9 +148,9 @@ async function check() {
     return { ok: false, status: res.status, err: ['notJson'] };
   }
   try {
-    return { ok: true, part, ...parseAvailability(data, part) };
+    return { ok: true, part, model: name, ...parseAvailability(data, part) };
   } catch (e) {
-    console.warn('[Duo Watch] raw response', data);
+    console.warn('[iPhone Stock Alert] raw response', data);
     return { ok: false, err: e.code === 'apple' ? ['apple', e.message] : ['badShape'] };
   }
 }
@@ -224,10 +252,14 @@ root.innerHTML = `
   summary::before { content: '▸ '; }
   details[open] summary::before { content: '▾ '; }
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .wide { grid-column: 1 / -1; }
   label { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
-  input { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
+  input, select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
           color: var(--fg); font-size: 13px; border: 1px solid transparent; }
-  input:focus { border-color: var(--blue); }
+  select { cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+           background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 24px; }
+  select option { color: #1d1d1f; }
+  input:focus, select:focus { border-color: var(--blue); }
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   button.btn { all: unset; flex: 1; text-align: center; padding: 8px 12px; border-radius: 10px; font-weight: 600; cursor: pointer; }
   .btn.primary { background: var(--blue); color: #fff; }
@@ -247,7 +279,7 @@ root.innerHTML = `
 </style>
 <div class="card" data-state="idle">
   <div class="bar" data-drag>
-    <span class="dot"></span><span class="title">Duo Watch</span><span class="mini"></span>
+    <span class="dot"></span><span class="title">iPhone Stock Alert</span><span class="mini"></span>
     <span class="grow"></span>
     <div class="lang"><button data-lang="en">EN</button><button data-lang="zh">中</button></div>
     <button class="icon" data-a="collapse">–</button>
@@ -262,8 +294,9 @@ root.innerHTML = `
     <details>
       <summary data-t="settings"></summary>
       <div class="fields">
+        <label class="wide"><span data-t="model"></span><select data-k="model"></select></label>
+        <label class="wide" data-v="manual" hidden><span data-t="part"></span><input data-k="manualPart" placeholder="MK1E4LL/A"></label>
         <label><span data-t="postal"></span><input data-k="postal" placeholder="95014 / M5V 3L9"></label>
-        <label><span data-t="part"></span><input data-k="part"></label>
       </div>
     </details>
     <div class="actions">
@@ -283,7 +316,6 @@ async function render() {
   lang = c.lang === 'zh' ? 'zh' : 'en';
   root.querySelectorAll('[data-t]').forEach((el) => (el.textContent = t(el.dataset.t)));
   root.querySelectorAll('[data-lang]').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang));
-  $('[data-k=part]').placeholder = t('auto');
   $('[data-a=collapse]').title = t('collapse');
 
   const r = view.result;
@@ -300,7 +332,11 @@ async function render() {
   else headline = t('none');
   $('.headline').textContent = headline;
   $('.mini').textContent = headline;
-  $('.sub').textContent = `iPhone Duo ${TARGET.label} · ${c.part || t('partPending')}${c.postal ? ' · ' + c.postal : ''}`;
+  const model = currentModel(c);
+  const what = model ? modelLabel(model) : !models.length && c.manualPart ? c.manualPart : t('noModelYet');
+  $('.sub').textContent = `${familyLabel} · ${what}${c.postal ? ' · ' + c.postal : ''}`;
+  renderModelOptions(model);
+  $('[data-v=manual]').hidden = models.length > 0;
 
   const left = view.nextAt ? Math.max(0, Math.round((view.nextAt - Date.now()) / 1000)) : null;
   $('[data-v=times]').textContent =
@@ -330,12 +366,25 @@ async function render() {
   $('[data-a=collapse]').textContent = c.collapsed ? '+' : '–';
 }
 
+// Rebuilt only when the language changes, so an open dropdown isn't reset every second.
+let optionsLang = null;
+function renderModelOptions(selected) {
+  const select = $('[data-k=model]');
+  if (optionsLang !== lang) {
+    optionsLang = lang;
+    select.innerHTML =
+      `<option value="">${esc(t('choose'))}</option>` +
+      models.map((m) => `<option value="${esc(modelKey(m))}">${esc(modelLabel(m))}</option>`).join('');
+  }
+  select.value = selected ? modelKey(selected) : '';
+}
+
 async function initPanel() {
   const c = await getConfig();
   view.running = !!c.running;
   $('[data-k=postal]').value = c.postal || '';
-  $('[data-k=part]').value = c.part || '';
-  if (!c.postal) $('details').open = true;
+  $('[data-k=manualPart]').value = c.manualPart || '';
+  if (!c.postal || !currentModel(c)) $('details').open = true;
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
   render();
   setInterval(() => view.running && render(), 1000);
@@ -373,8 +422,12 @@ root.addEventListener('change', async (e) => {
   const k = e.target.dataset && e.target.dataset.k;
   if (!k) return;
   const v = e.target.value.trim();
-  await chrome.storage.local.set(k === 'part' ? { part: v, partPrefix: prefix } : { [k]: v });
-  if (k === 'part' && !v) $('[data-k=part]').value = (await detectPart()) || '';
+  if (k === 'model') {
+    await chrome.storage.local.set({ target: v ? { family, key: v } : null });
+    chrome.runtime.sendMessage({ type: 'reset' }); // a new model deserves fresh alerts
+  } else {
+    await chrome.storage.local.set({ [k]: v });
+  }
   render();
 });
 
@@ -424,7 +477,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
 });
 
 (async () => {
-  await detectPart();
+  models = listModels(document.documentElement.innerHTML);
+  await pickFromUrl();
   await initPanel();
   chrome.runtime.sendMessage({ type: 'hello' });
 })();

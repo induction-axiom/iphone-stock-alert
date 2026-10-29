@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Duo Watch Mac alarm helper (Python standard library only).
+"""iPhone Stock Alert Mac alarm helper (Python standard library only).
 
 - On /alert from the extension: volume to max, a spoken alert on a loop and a dialog,
   until you click the dialog button
@@ -7,9 +7,9 @@
 - Watchdog: speaks up if the extension goes quiet for 90s, or no check has worked for 5 minutes
 
 Usage:
-  python3 duo_alarm.py              # run it
-  python3 duo_alarm.py --test       # fire a real alarm now (loud!); add --zh for Chinese
-  python3 duo_alarm.py --dry-run    # print what it would do, no sound
+  python3 stock_alarm.py              # run it
+  python3 stock_alarm.py --test       # fire a real alarm now (loud!); add --zh for Chinese
+  python3 stock_alarm.py --dry-run    # print what it would do, no sound
 
 Optional environment variable:
   NTFY_TOPIC=some-random-string     also push to the ntfy app on your phone (max priority)
@@ -35,21 +35,21 @@ ALARM_MAX_S = 15 * 60
 
 TEXT = {
     "en": {
-        "speak": "iPhone Duo is in stock! Go buy it now!",
+        "speak": "{model} is in stock! Go buy it now!",
         "button": "Got it",
-        "title": "iPhone Duo in stock",
+        "title": "iPhone in stock",
         "stalled": "Stock monitor stopped. The Chrome extension has been silent for 90 seconds.",
         "blocked": "Stock monitor has not had a successful check in 5 minutes. Apple may be blocking it.",
-        "test_title": "Duo Watch test",
+        "test_title": "iPhone Stock Alert test",
         "test_message": "This is a test alarm: Apple Somewhere — Available Today",
     },
     "zh": {
-        "speak": "iPhone Duo 有货了！快去下单！",
+        "speak": "{model} 有货了！快去下单！",
         "button": "我知道了",
-        "title": "iPhone Duo 有货了",
+        "title": "iPhone 有货了",
         "stalled": "库存监控停了，Chrome 扩展已经一分半没有动静，去看一下",
         "blocked": "库存监控已经五分钟没有成功查到库存，可能被 Apple 暂时限制了",
-        "test_title": "Duo Watch 测试",
+        "test_title": "iPhone 到货提醒测试",
         "test_message": "这是测试警报：Apple 某某店 Available Today",
     },
 }
@@ -117,7 +117,7 @@ def push_phone(title, message, url):
         log("ntfy push failed:", e)
 
 
-def alarm(title, message, url, lang):
+def alarm(title, message, url, lang, model="iPhone"):
     global alarm_stop
     with lock:
         if alarm_stop and not alarm_stop.is_set():
@@ -148,7 +148,7 @@ def alarm(title, message, url, lang):
 
     deadline = time.time() + ALARM_MAX_S
     while not stop.is_set() and time.time() < deadline:
-        speak(text["speak"], lang)
+        speak(text["speak"].format(model=model.replace("·", ",").replace('"', " inch")), lang)
         stop.wait(1.5)
 
     stop.set()
@@ -175,7 +175,7 @@ def warn(key):
     lang = state["lang"]
     text = TEXT[lang][key]
     log("⚠️", text)
-    osa(f'display notification "{text}" with title "Duo Watch" sound name "Basso"')
+    osa(f'display notification "{text}" with title "iPhone Stock Alert" sound name "Basso"')
     speak(text, lang)
 
 
@@ -217,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         # Only the extension sends this header; a web page can't without a CORS preflight we never allow.
-        if self.headers.get("X-Duo-Watch") != "1":
+        if self.headers.get("X-Stock-Alert") != "1":
             return self._json(403, {"error": "forbidden"})
         length = int(self.headers.get("Content-Length") or 0)
         try:
@@ -240,7 +240,13 @@ class Handler(BaseHTTPRequestHandler):
                     state["last_error"] = body["error"]
             return self._json(200, {"ok": True})
         if self.path == "/alert":
-            args = (str(body.get("title") or TEXT[lang]["title"]), str(body.get("message", "")), str(body.get("url", "")), lang)
+            args = (
+                str(body.get("title") or TEXT[lang]["title"]),
+                str(body.get("message", "")),
+                str(body.get("url", "")),
+                lang,
+                str(body.get("model") or "iPhone"),
+            )
             threading.Thread(target=alarm, args=args, daemon=True).start()
             return self._json(200, {"ok": True})
         if self.path == "/ack":
@@ -263,7 +269,7 @@ def main():
         subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
     threading.Thread(target=watchdog, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    log(f"Duo Watch helper running on http://127.0.0.1:{PORT}  voices={VOICES}  phone push={'on' if NTFY_TOPIC else 'off'}")
+    log(f"iPhone Stock Alert helper running on http://127.0.0.1:{PORT}  voices={VOICES}  phone push={'on' if NTFY_TOPIC else 'off'}")
     log("Keep this window open. Ctrl+C to quit.")
     try:
         server.serve_forever()
