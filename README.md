@@ -2,17 +2,10 @@
 
 Pick the iPhone you want and get alerted the moment it's available for in-store pickup near you.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/watching-dark.png">
-    <img src="docs/watching-light.png" width="320" alt="Panel while watching">
-  </picture>
-  &nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/in-stock-dark.png">
-    <img src="docs/in-stock-light.png" width="320" alt="Panel when the iPhone is in stock">
-  </picture>
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/on-apple-dark.png">
+  <img src="docs/on-apple-light.png" alt="The iPhone Stock Alert panel on Apple's iPhone Duo buy page, watching nearby stores">
+</picture>
 
 A small panel sits on Apple's own buy page and checks nearby stores about every 10 seconds, from **your own Chrome tab**, the same way you'd check by hand. It works on any iPhone buy page (iPhone Duo, iPhone 18 Pro, …), in English or 中文.
 
@@ -26,6 +19,15 @@ A small panel sits on Apple's own buy page and checks nearby stores about every 
 4. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
 
 Leave that tab open in its own window. Any store Apple lists near your postal code counts, and the panel shows how far each one is.
+
+When it shows up, the panel turns red and every alert you picked goes off:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/in-stock-on-apple-dark.png">
+  <img src="docs/in-stock-on-apple-light.png" alt="The panel on Apple's buy page when a nearby store has the iPhone in stock">
+</picture>
+
+<sub>Screenshots show Apple's real buy page with example store results.</sub>
 
 ## Alerts
 
