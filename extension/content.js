@@ -9,12 +9,15 @@ let models = [];
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 let lang = 'en';
 // lastOk is the latest successful result; result is the latest check, which may have failed.
-const view = { running: false, ringing: false, result: null, lastOk: null, checkedAt: null, okAt: null, nextAt: null, editing: false, testNote: null };
+const view = { running: false, ringing: false, result: null, lastOk: null, checkedAt: null, okAt: null, nextAt: null, editing: false, testNote: null, isWatcher: true };
 
 const STRINGS = {
   en: {
     noPostal: 'Enter your postal code first',
     noModel: 'Pick a model first',
+    otherProduct: (label, here) => `You're watching ${label}, but this page is ${here}. Pick a model here to switch.`,
+    elsewhere: 'Checking from another Apple tab.',
+    watchHere: 'Check from here',
     network: (m) => 'Network error: ' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? ': temporarily blocked by Apple' : ''),
     notJson: 'Response was not JSON (probably blocked)',
@@ -69,6 +72,9 @@ const STRINGS = {
   zh: {
     noPostal: '请先填邮编',
     noModel: '请先选机型',
+    otherProduct: (label, here) => `你在监控 ${label}，但这个页面是 ${here}。在这里选一个机型即可切换。`,
+    elsewhere: '正在另一个 Apple 页面里检查。',
+    watchHere: '改在这里检查',
     network: (m) => '网络错误：' + m,
     http: (s) => `HTTP ${s}` + (s === 541 ? '，被 Apple 暂时限制' : ''),
     notJson: '返回的不是 JSON（可能被限制）',
@@ -168,6 +174,7 @@ async function pickFromUrl() {
 async function check() {
   const c = await getConfig();
   if (!c.postal) return { ok: false, err: ['noPostal'] };
+  if (c.target && c.target.family !== family) return { ok: false, err: ['otherProduct', c.target.label, familyLabel] };
   const model = currentModel(c);
   const part = model ? model.part : !models.length && c.manualPart;
   if (!part) return { ok: false, err: ['noModel'] };
@@ -270,6 +277,7 @@ root.innerHTML = `
   .srow .v.unset { color: var(--amber); }
   button.link { all: unset; color: var(--blue); font-weight: 600; font-size: 12px; cursor: pointer; padding: 2px 4px; margin-right: -4px; border-radius: 6px; align-self: flex-start; margin-top: 5px; }
   .code button.link { align-self: center; margin-top: 0; }
+  .meta button.link { margin-top: 0; }
   button.link:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
   .toggles { display: flex; flex-wrap: wrap; gap: 4px; }
   button.tog { all: unset; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; cursor: pointer;
@@ -338,6 +346,7 @@ root.innerHTML = `
   <div class="body">
     <div class="headline"></div>
     <div class="meta" data-v="times"></div>
+    <div class="meta" data-v="elsewhere" hidden><span data-t="elsewhere"></span> <button class="link" data-a="takeover" data-t="watchHere"></button></div>
     <div class="status">
       <div class="srow">
         <span class="k" data-t="watching"></span><span class="v" data-v="watchText"></span>
@@ -392,11 +401,13 @@ async function render() {
 
   // Status: what is being watched and how alerts are set, always visible.
   const model = currentModel(c);
-  const what = model ? modelLabel(model) : !models.length && c.manualPart ? c.manualPart : null;
+  const elsewhere = !model && c.target && c.target.family !== family && c.target.label; // watching another iPhone
+  const what = model ? `${familyLabel} ${modelLabel(model)}` : elsewhere || (!models.length && c.manualPart ? c.manualPart : null);
   const ready = !!(what && c.postal);
-  $('[data-v=watchText]').textContent = ready ? `${familyLabel} ${what} · ${c.postal}` : t('notSet');
+  $('[data-v=watchText]').textContent = ready ? `${what} · ${c.postal}` : t('notSet');
   $('[data-v=watchText]').classList.toggle('unset', !ready);
   const editing = view.editing || !ready;
+  $('[data-v=elsewhere]').hidden = !(view.running && !view.isWatcher);
   $('[data-v=fields]').hidden = !editing;
   $('[data-a=edit]').textContent = editing ? t('done') : t('edit');
   $('[data-a=edit]').hidden = editing && !ready;
@@ -481,6 +492,8 @@ function renderModelOptions(selected) {
 
 async function initPanel() {
   const c = await getConfig();
+  // Topics made by earlier versions were short enough to guess; replace them.
+  if (c.ntfyTopic && !isStrongTopic(c.ntfyTopic)) await chrome.storage.local.set({ ntfyTopic: randomTopic() });
   view.running = !!c.running;
   $('[data-k=postal]').value = c.postal || '';
   $('[data-k=manualPart]').value = c.manualPart || '';
@@ -489,8 +502,9 @@ async function initPanel() {
   setInterval(() => view.running && render(), 1000);
 }
 
-const randomTopic = () =>
-  'iphone-alert-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => (b % 36).toString(36)).join('');
+// ntfy topics are public to anyone who knows the name, so the name is a full random UUID.
+const randomTopic = () => 'iphone-alert-' + crypto.randomUUID();
+const isStrongTopic = (topic) => /^iphone-alert-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(topic);
 
 // Editing settings makes the panel taller; nudge a dragged panel back inside the window.
 function keepInView() {
@@ -535,8 +549,10 @@ root.addEventListener('change', async (e) => {
   if (!k) return;
   const v = e.target.value.trim();
   if (k === 'model') {
-    await chrome.storage.local.set({ target: v ? { family, key: v } : null });
+    const m = models.find((x) => modelKey(x) === v);
+    await chrome.storage.local.set({ target: m ? { family, key: v, label: `${familyLabel} ${modelLabel(m)}` } : null });
     chrome.runtime.sendMessage({ type: 'reset' }); // a new model deserves fresh alerts
+    chrome.runtime.sendMessage({ type: 'takeover' }); // and is checked from the page it was picked on
     view.lastOk = null;
   } else {
     await chrome.storage.local.set({ [k]: v });
@@ -575,6 +591,8 @@ root.addEventListener('click', async (e) => {
     if (!view.running) view.nextAt = null;
     await chrome.storage.local.set({ running: view.running });
     chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop' });
+  } else if (a === 'takeover') {
+    chrome.runtime.sendMessage({ type: 'takeover' });
   } else if (a === 'edit') {
     view.editing = !view.editing;
   } else if (a === 'test') {
@@ -600,22 +618,27 @@ root.addEventListener('click', async (e) => {
   render();
 });
 
+function showResult(r) {
+  view.result = r;
+  view.checkedAt = Date.now();
+  if (r.ok) {
+    view.lastOk = r;
+    view.okAt = view.checkedAt;
+  }
+  render();
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === 'check') {
     check().then((r) => {
-      view.result = r;
-      view.checkedAt = Date.now();
-      if (r.ok) {
-        view.lastOk = r;
-        view.okAt = view.checkedAt;
-      }
-      render();
+      showResult(r);
       reply(r);
     });
     return true; // async reply
   }
+  if (msg.type === 'result') showResult(msg.r); // checked by another tab
   if (msg.type === 'status') {
-    Object.assign(view, { running: msg.running, nextAt: msg.nextAt });
+    Object.assign(view, { running: msg.running, nextAt: msg.nextAt, isWatcher: msg.watcher });
     render();
   }
   if (msg.type === 'found') startFlash();

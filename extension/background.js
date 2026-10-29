@@ -1,6 +1,7 @@
 // Drives the polling loop and sends alerts. Timers live here rather than in the page because
 // Chrome throttles timers in background tabs to once a minute; messages to the tab are not throttled.
 const NTFY = 'https://ntfy.sh/';
+const BUY_PAGES = 'https://www.apple.com/*shop/buy-iphone/*';
 const BASE_MS = 10_000;
 const JITTER_MS = 2_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
@@ -83,7 +84,7 @@ async function alertFound(stores, tabId, model) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab ? tab.url : '';
 
-  chrome.tabs.sendMessage(tabId, { type: 'found' }).catch(() => {}); // the panel flashes either way
+  broadcast({ type: 'found' }); // every panel flashes either way
   if (channels.chrome) {
     notifyChrome(title, message);
     if (tab) {
@@ -145,10 +146,31 @@ async function testChannel(channel) {
 
 // ---------- polling ----------
 
-// Tells the panel when the next check is.
-function pushStatus(tabId, running, nextAt) {
-  if (tabId == null) return;
-  chrome.tabs.sendMessage(tabId, { type: 'status', running, nextAt }).catch(() => {});
+// One tab (the "watcher", stored as tabId) runs the checks. Every open buy page shows the same
+// panel, so results and status go to all of them.
+const buyTabs = () => chrome.tabs.query({ url: BUY_PAGES }).catch(() => []);
+
+async function broadcast(msg, exceptId) {
+  for (const tab of await buyTabs()) {
+    if (tab.id !== exceptId) chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+  }
+}
+
+async function statusAll() {
+  const s = await getState();
+  for (const tab of await buyTabs()) {
+    chrome.tabs
+      .sendMessage(tab.id, { type: 'status', running: !!s.running, nextAt: s.running ? s.nextAt : null, watcher: tab.id === s.tabId })
+      .catch(() => {});
+  }
+}
+
+async function makeWatcher(tabId) {
+  await chrome.storage.local.set({ tabId, fails: 0, nextAt: null });
+  chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
+  const s = await getState();
+  if (s.running) schedule(1_000);
+  statusAll();
 }
 
 function askTab(tabId) {
@@ -171,6 +193,7 @@ async function tick() {
   if (s.tabId == null) {
     badge('?', '#888');
     await chrome.storage.local.set({ nextAt: null });
+    statusAll();
     return; // waits for a 'hello' from an open iPhone buy page
   }
   if (s.nextAt && Date.now() - s.nextAt > GAP_MS) await reportGap(Math.round((Date.now() - s.nextAt) / 60_000));
@@ -181,6 +204,7 @@ async function tick() {
   } catch (e) {
     r = { ok: false, dead: true };
   }
+  if (r && !r.dead) broadcast({ type: 'result', r }, s.tabId);
   const now = Date.now();
   let fails = s.fails || 0;
   let failingSince = s.failingSince || null;
@@ -212,7 +236,7 @@ async function tick() {
   const delay = nextDelay(fails);
   await chrome.storage.local.set({ fails, failingSince, nextAt: Date.now() + delay });
   schedule(delay);
-  pushStatus(s.tabId, true, Date.now() + delay);
+  statusAll();
 }
 
 function badge(text, color) {
@@ -222,16 +246,18 @@ function badge(text, color) {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === 'hello' && sender.tab) {
-    chrome.tabs.update(sender.tab.id, { autoDiscardable: false });
-    chrome.storage.local.set({ tabId: sender.tab.id }).then(async () => {
-      const s = await getState();
-      if (s.running && !timer) schedule(1_000);
-      pushStatus(sender.tab.id, !!s.running, null);
+    // A new buy page only takes over when no other tab is checking.
+    getState().then(async (s) => {
+      const current = s.tabId != null && (await chrome.tabs.get(s.tabId).catch(() => null));
+      if (!current || s.tabId === sender.tab.id) return makeWatcher(sender.tab.id);
+      statusAll();
     });
+  } else if (msg.type === 'takeover' && sender.tab) {
+    makeWatcher(sender.tab.id);
   } else if (msg.type === 'start') {
     chrome.storage.local
       .set({ running: true, fails: 0, failingSince: null, alerted: [], lastReloadAt: Date.now(), nextAt: null, lastGap: null })
-      .then(() => schedule(0));
+      .then(() => (sender.tab ? makeWatcher(sender.tab.id) : schedule(0)));
   } else if (msg.type === 'stop') {
     clearTimeout(timer);
     timer = null;
@@ -239,11 +265,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     chrome.power.releaseKeepAwake();
     stopVoice();
     badge('', '#888');
-    if (sender.tab) pushStatus(sender.tab.id, false, null);
+    statusAll();
   } else if (msg.type === 'reset') {
     chrome.storage.local.set({ alerted: [], fails: 0 }).then(() => timer && schedule(1_000));
   } else if (msg.type === 'ack') {
     stopVoice();
+    broadcast({ type: 'ack' }, sender.tab && sender.tab.id);
   } else if (msg.type === 'test') {
     testChannel(msg.channel).then(reply);
     return true; // async reply
@@ -259,13 +286,16 @@ chrome.notifications.onClicked.addListener(async () => {
   if (tab) {
     chrome.windows.update(tab.windowId, { focused: true });
     chrome.tabs.update(tabId, { active: true });
-    chrome.tabs.sendMessage(tabId, { type: 'ack' }).catch(() => {});
   }
+  broadcast({ type: 'ack' });
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const s = await getState();
   if (tabId !== s.tabId) return;
+  // Hand over to another open buy page if there is one; only warn when none is left.
+  const next = (await buyTabs()).find((tab) => tab.id !== tabId);
+  if (next) return makeWatcher(next.id);
   await chrome.storage.local.set({ tabId: null, nextAt: null });
   if (s.running) reportTabClosed();
 });
