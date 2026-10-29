@@ -142,9 +142,10 @@ const t = (key, ...args) => {
   return typeof s === 'function' ? s(...args) : s;
 };
 
-// Each tab is its own watch. Its settings live in the page's sessionStorage, so they survive this
-// tab reloading (the extension reloads it to refresh Apple's cookies) and vanish when it closes.
-// Only the last postal code and the phone topic are remembered across tabs.
+// Each tab is its own watch. Its settings, and whether it's watching, live in the page's
+// sessionStorage, so they survive this tab reloading (to refresh Apple's cookies, or after the
+// extension updates) and vanish when it closes. Only the last postal code and the phone topic are
+// remembered across tabs.
 const tabGet = (name) => sessionStorage.getItem('pickupAlert.' + name) || '';
 const tabSet = (name, value) =>
   value ? sessionStorage.setItem('pickupAlert.' + name, value) : sessionStorage.removeItem('pickupAlert.' + name);
@@ -532,7 +533,13 @@ async function initPanel() {
   $('[data-k=postal]').value = c.postal || '';
   if (c.panelPos) placeAt(c.panelPos.x, c.panelPos.y);
   render();
-  setInterval(() => view.running && render(), 1000);
+  setInterval(() => {
+    if (!view.running) return;
+    // An extension update or reload cuts this copy of the panel off; reloading the page brings in
+    // the new one, which picks the watch back up.
+    if (!chrome.runtime?.id) return location.reload();
+    render();
+  }, 1000);
 }
 
 // ntfy topics are public to anyone who knows the name, so a new one is a full random UUID.
@@ -623,6 +630,7 @@ root.addEventListener('click', async (e) => {
   if (a === 'toggle') {
     view.running = !view.running;
     if (!view.running) view.nextAt = null;
+    tabSet('watching', view.running ? family : '');
     const c = await getConfig();
     chrome.runtime.sendMessage({ type: view.running ? 'start' : 'stop', family, lang: c.lang, channels: c.channels, warn: c.warn });
   } else if (a === 'edit') {
@@ -665,6 +673,7 @@ root.addEventListener('click', async (e) => {
 
 function applyStatus(s) {
   Object.assign(view, { running: s.running, nextAt: s.nextAt, lastGap: s.lastGap });
+  if (s.running) tabSet('watching', family); // only Stop clears it: "not running" may just mean the extension restarted
   render();
 }
 
@@ -697,4 +706,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   const status = await chrome.runtime.sendMessage({ type: 'hello', family }).catch(() => null);
   if (status) applyStatus(status);
   sendPrefs();
+  // The extension forgets its watches when it updates or Chrome restarts; a tab that was watching
+  // this iPhone starts again by itself.
+  const was = tabGet('watching');
+  if (was !== family) tabSet('watching', '');
+  else if (status && !status.running) {
+    const c = await getConfig();
+    chrome.runtime.sendMessage({ type: 'start', family, lang: c.lang, channels: c.channels, warn: c.warn });
+  }
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pickup Alert for iPhone",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Watches Apple Store pickup stock for the iPhone you pick, from your own browser, and alarms when it's in stock.",
   "permissions": [
     "notifications",

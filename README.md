@@ -53,6 +53,7 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 
 ## Keep it running
 
+- **Updates and restarts don't stop it.** When the extension updates or Chrome reopens your tabs, a tab that was watching reloads and starts again by itself.
 - **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off). If checks were paused anyway, the panel says for how long.
 - **Keep Chrome from pausing the tab:** in `chrome://settings/performance`, add `apple.com` to *Always keep these sites active*.
 - If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers.
