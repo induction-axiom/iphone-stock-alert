@@ -9,13 +9,14 @@ const MIN_RELOAD_GAP_MS = 5 * 60_000;
 const HEALTHY_RELOAD_MS = 30 * 60_000; // refresh Apple's cookies now and then
 const TAB_TIMEOUT_MS = 20_000;
 const FAILING_WARN_MS = 5 * 60_000;
+const GAP_MS = 2 * 60_000; // a check this late means the Mac slept or Chrome was paused
 const VOICE_MAX_MS = 15 * 60_000;
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 
 let timer = null;
 
 const getState = () =>
-  chrome.storage.local.get(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted']);
+  chrome.storage.local.get(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted', 'nextAt']);
 
 async function getPrefs() {
   const p = await chrome.storage.local.get(['lang', 'channels', 'ntfyTopic']);
@@ -107,6 +108,25 @@ async function warnFailing() {
   if (channels.voice) speak(text, zh, false);
 }
 
+// Checks can't run while the Mac sleeps, so say how long they were paused once they're back.
+async function reportGap(minutes) {
+  await chrome.storage.local.set({ lastGap: { minutes, at: Date.now() } });
+  const { zh, channels, topic } = await getPrefs();
+  const text = zh
+    ? `监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`
+    : `Monitoring was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`;
+  if (channels.phone && topic) pushPhone(topic, 'iPhone Stock Alert', text, '');
+}
+
+async function reportTabClosed() {
+  const { zh, channels, topic } = await getPrefs();
+  const text = zh
+    ? '监控已停止：Apple 页面被关掉了。重新打开该页面即可继续。'
+    : 'Monitoring stopped: the Apple page was closed. Open it again to resume.';
+  if (channels.chrome) notifyChrome('iPhone Stock Alert', text);
+  if (channels.phone && topic) pushPhone(topic, 'iPhone Stock Alert', text, '');
+}
+
 async function testChannel(channel) {
   const { zh, topic } = await getPrefs();
   const title = zh ? 'iPhone 到货提醒测试' : 'iPhone Stock Alert test';
@@ -150,8 +170,10 @@ async function tick() {
   chrome.power.requestKeepAwake('system'); // the screen may sleep, the Mac may not
   if (s.tabId == null) {
     badge('?', '#888');
+    await chrome.storage.local.set({ nextAt: null });
     return; // waits for a 'hello' from an open iPhone buy page
   }
+  if (s.nextAt && Date.now() - s.nextAt > GAP_MS) await reportGap(Math.round((Date.now() - s.nextAt) / 60_000));
 
   let r;
   try {
@@ -187,8 +209,8 @@ async function tick() {
     }
   }
 
-  await chrome.storage.local.set({ fails, failingSince });
   const delay = nextDelay(fails);
+  await chrome.storage.local.set({ fails, failingSince, nextAt: Date.now() + delay });
   schedule(delay);
   pushStatus(s.tabId, true, Date.now() + delay);
 }
@@ -208,12 +230,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     });
   } else if (msg.type === 'start') {
     chrome.storage.local
-      .set({ running: true, fails: 0, failingSince: null, alerted: [], lastReloadAt: Date.now() })
+      .set({ running: true, fails: 0, failingSince: null, alerted: [], lastReloadAt: Date.now(), nextAt: null, lastGap: null })
       .then(() => schedule(0));
   } else if (msg.type === 'stop') {
     clearTimeout(timer);
     timer = null;
-    chrome.storage.local.set({ running: false });
+    chrome.storage.local.set({ running: false, nextAt: null });
     chrome.power.releaseKeepAwake();
     stopVoice();
     badge('', '#888');
@@ -243,7 +265,9 @@ chrome.notifications.onClicked.addListener(async () => {
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const s = await getState();
-  if (tabId === s.tabId) await chrome.storage.local.set({ tabId: null });
+  if (tabId !== s.tabId) return;
+  await chrome.storage.local.set({ tabId: null, nextAt: null });
+  if (s.running) reportTabClosed();
 });
 
 // Chrome can shut down this service worker; the alarm wakes it up and restarts the loop.

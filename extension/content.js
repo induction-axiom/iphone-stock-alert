@@ -34,6 +34,12 @@ const STRINGS = {
     chChrome: 'Chrome notification',
     chChromeHint: 'Pops up and brings this tab to the front',
     chChromeHelp: "Didn't see it? In macOS System Settings → Notifications → Google Chrome, allow notifications (and turn off Focus).",
+    notSet: 'Not set',
+    allOff: 'All off',
+    short: { chrome: 'Chrome', voice: 'Voice', phone: 'Phone' },
+    fine: 'Checks only while this tab is open and your Mac is awake. Closing the lid or quitting Chrome pauses it.',
+    gap: (m, at) => `Paused ${m} min (Mac asleep or Chrome paused) · resumed ${at}`,
+    dismiss: 'Dismiss',
     chVoice: 'Say it out loud',
     chVoiceSub: "Repeats until you stop it. Keep your Mac's volume up.",
     chPhone: 'Push to my phone',
@@ -78,6 +84,12 @@ const STRINGS = {
     chChrome: 'Chrome 通知',
     chChromeHint: '弹出通知，并把这个页面切到最前面',
     chChromeHelp: '没看到通知？在 macOS 系统设置 → 通知 → Google Chrome 里允许通知（并关掉专注模式）。',
+    notSet: '未设置',
+    allOff: '全部关闭',
+    short: { chrome: 'Chrome', voice: '语音', phone: '手机' },
+    fine: '只在这个页面开着、Mac 醒着时检查。合上盖子或退出 Chrome 会暂停。',
+    gap: (m, at) => `暂停了 ${m} 分钟（Mac 睡眠或 Chrome 被暂停）· ${at} 已恢复`,
+    dismiss: '关闭',
     chVoice: '语音播报',
     chVoiceSub: '一直重复，直到你点停止。请把 Mac 音量调大。',
     chPhone: '推送到手机',
@@ -106,7 +118,7 @@ const t = (key, ...args) => {
 };
 
 async function getConfig() {
-  const c = await chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang', 'channels', 'ntfyTopic']);
+  const c = await chrome.storage.local.get(['postal', 'target', 'manualPart', 'running', 'panelPos', 'collapsed', 'lang', 'channels', 'ntfyTopic', 'lastGap']);
   const saved = c.channels || {};
   c.channels = Object.fromEntries(Object.entries(DEFAULT_CHANNELS).map(([k, on]) => [k, k in saved ? saved[k] : on]));
   return c;
@@ -235,6 +247,7 @@ root.innerHTML = `
   .lang { display: flex; padding: 2px; border-radius: 7px; background: var(--chip); }
   .lang button { all: unset; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; }
   .lang button.on { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+  .lang button:not(.on):hover { color: var(--blue); }
   .body { padding: 0 14px 14px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
   .collapsed .body { display: none; }
   .headline { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 2px 0 2px; }
@@ -250,15 +263,24 @@ root.innerHTML = `
   .pill.yes { background: var(--green); color: #fff; }
   .note { margin-top: 8px; color: var(--muted); font-size: 12px; }
   .err { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--fg); font-size: 12px; }
-  details { margin-top: 10px; }
-  summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
-  summary::before { content: '▸ '; }
-  details[open] summary::before { content: '▾ '; }
-  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  details { border-top: 1px solid var(--line); }
+  .meta + .stores, .note + details, .err + details { margin-top: 0; }
+  summary { display: flex; align-items: center; gap: 6px; padding: 9px 0; cursor: pointer; list-style: none;
+            font-size: 12px; font-weight: 500; color: var(--fg); }
+  summary::-webkit-details-marker { display: none; }
+  summary .peek { flex: 1; min-width: 0; text-align: right; color: var(--muted); font-weight: 400;
+                  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  summary::after { content: '›'; color: var(--muted); font-size: 15px; line-height: 1; transition: transform .15s; }
+  details[open] > summary::after { transform: rotate(90deg); }
+  summary:hover, summary:hover::after { color: var(--blue); }
+  details[open] > summary { padding-bottom: 4px; }
+  details > :last-child { margin-bottom: 10px; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .wide { grid-column: 1 / -1; }
   label { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
   input:not([type=checkbox]), select { all: unset; box-sizing: border-box; width: 100%; padding: 6px 8px; border-radius: 8px; background: var(--chip);
-          color: var(--fg); font-size: 13px; border: 1px solid transparent; }
+          color: var(--fg); font-size: 13px; border: 1px solid var(--line); }
+  input:not([type=checkbox]):hover, select:hover { border-color: color-mix(in srgb, var(--fg) 25%, transparent); }
   select { cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
            background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 24px; }
   select option { color: #1d1d1f; }
@@ -267,14 +289,15 @@ root.innerHTML = `
   .ch + .ch, .howto + .ch { border-top: 1px solid var(--line); }
   button.check { all: unset; display: flex; align-items: flex-start; gap: 8px; flex: 1; cursor: pointer; color: var(--fg); font-size: 13px; }
   button.check small { display: block; color: var(--muted); font-size: 11px; }
-  .tick { width: 14px; height: 14px; margin-top: 2px; flex: none; border-radius: 4px; border: 1.5px solid var(--muted);
+  .tick { width: 14px; height: 14px; margin-top: 2px; flex: none; border-radius: 4px; border: 1.5px solid color-mix(in srgb, var(--fg) 40%, transparent);
           display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
   .check[aria-checked="true"] .tick { background: var(--blue); border-color: var(--blue); }
   .check[aria-checked="true"] .tick::after { content: '✓'; }
-  .check:focus-visible .tick { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .check:hover .tick { border-color: var(--blue); }
   .card.flash { animation: pulse 1s ease-in-out 3; border-color: var(--red); }
-  button.chip { all: unset; padding: 3px 9px; border-radius: 7px; background: var(--chip); color: var(--fg); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-  button.chip:hover { filter: brightness(.95); }
+  button.chip { all: unset; padding: 2px 9px; border-radius: 7px; border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
+                 color: var(--blue); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button.chip:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
   .howto { margin: 0 0 8px 23px; color: var(--muted); font-size: 11px; }
   .code { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 6px 6px 6px 8px; border-radius: 8px; background: var(--chip); }
   .code code { flex: 1; min-width: 0; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); word-break: break-all; }
@@ -285,6 +308,11 @@ root.innerHTML = `
   .btn.secondary { background: var(--chip); color: var(--fg); }
   .btn.danger { background: var(--red); color: #fff; }
   .btn:hover { filter: brightness(1.08); }
+  .fine { margin-top: 8px; color: var(--muted); font-size: 11px; text-align: center; }
+  .gap { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 7px 8px 7px 10px; border-radius: 10px;
+         background: var(--chip); color: var(--fg); font-size: 12px; }
+  .gap span { flex: 1; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
   [hidden] { display: none !important; }
 
   .card[data-state="ok"] .dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
@@ -310,8 +338,9 @@ root.innerHTML = `
     <div class="stores"></div>
     <div class="note" data-v="delivery"></div>
     <div class="err" data-v="error" hidden></div>
+    <div class="gap" data-v="gap" hidden><span data-v="gapText"></span><button class="icon" data-a="dismissGap">×</button></div>
     <details>
-      <summary data-t="settings"></summary>
+      <summary><span data-t="settings"></span><span class="peek" data-v="settingsPeek"></span></summary>
       <div class="fields">
         <label class="wide"><span data-t="model"></span><select data-k="model"></select></label>
         <label class="wide" data-v="manual" hidden><span data-t="part"></span><input data-k="manualPart" placeholder="MK1E4LL/A"></label>
@@ -319,7 +348,7 @@ root.innerHTML = `
       </div>
     </details>
     <details data-v="alerts">
-      <summary data-t="alerts"></summary>
+      <summary><span data-t="alerts"></span><span class="peek" data-v="alertsPeek"></span></summary>
       <div class="ch">
         <button class="check" role="checkbox" data-ch="chrome"><span class="tick"></span><span><span data-t="chChrome"></span><small data-t="chChromeHint"></small></span></button>
         <button class="chip" data-test="chrome" data-t="test"></button>
@@ -342,6 +371,7 @@ root.innerHTML = `
       <button class="btn primary" data-a="toggle"></button>
       <button class="btn danger" data-a="ack" data-t="ack" hidden></button>
     </div>
+    <div class="fine" data-t="fine"></div>
   </div>
 </div>`;
 document.documentElement.appendChild(host);
@@ -386,6 +416,12 @@ async function render() {
     (view.checkedAt ? t('last', clock(view.checkedAt)) : t('never')) + (view.running && left != null ? t('next', left) : '');
 
   for (const [k, on] of Object.entries(c.channels)) $(`[data-ch=${k}]`).setAttribute('aria-checked', String(on));
+  const enabled = Object.keys(c.channels).filter((k) => c.channels[k]);
+  $('[data-v=alertsPeek]').textContent = enabled.length ? enabled.map((k) => t('short')[k]).join(' · ') : t('allOff');
+  $('[data-v=settingsPeek]').textContent = model && c.postal ? `${c.postal}` : t('notSet');
+  $('[data-v=gap]').hidden = !c.lastGap;
+  if (c.lastGap) $('[data-v=gapText]').textContent = t('gap', c.lastGap.minutes, clock(c.lastGap.at));
+  $('[data-a=dismissGap]').title = t('dismiss');
   $('[data-v=chromeHelp]').hidden = !view.chromeTested;
   $('[data-v=phoneHow]').hidden = !c.channels.phone;
   $('[data-v=topic]').textContent = c.ntfyTopic || '';
@@ -540,6 +576,8 @@ root.addEventListener('click', async (e) => {
   } else if (a === 'ack') {
     stopFlash();
     chrome.runtime.sendMessage({ type: 'ack' });
+  } else if (a === 'dismissGap') {
+    await chrome.storage.local.set({ lastGap: null });
   } else if (a === 'collapse') {
     const c = await getConfig();
     await chrome.storage.local.set({ collapsed: !c.collapsed });

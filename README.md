@@ -46,7 +46,7 @@ Choose any combination in the panel. Each one has a **Test** button. Nothing to 
 
 ## Keep it running
 
-- **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off).
+- **Keep the lid open.** A sleeping Mac checks nothing. While watching, the extension keeps the Mac awake (the screen can still turn off). If checks were paused anyway, the panel says for how long, and so does your phone if phone alerts are on. Closing the Apple tab also sends an alert.
 - **Keep Chrome from pausing the tab:** in `chrome://settings/performance`, add `apple.com` to *Always keep these sites active*.
 - If Apple temporarily blocks checks (`HTTP 541`), the extension backs off on its own and recovers. If checks keep failing for 5 minutes, it tells you once.
 
