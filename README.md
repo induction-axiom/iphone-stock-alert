@@ -1,4 +1,4 @@
-# iPhone Stock Alert
+# <img src="extension/icons/icon128.png" width="36" align="top" alt=""> iPhone Stock Alert
 
 Pick the iPhone you want and get alerted the moment it's available for in-store pickup near you.
 

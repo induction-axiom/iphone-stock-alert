@@ -3,15 +3,43 @@
   "name": "iPhone Stock Alert",
   "version": "1.0.0",
   "description": "Watches Apple Store pickup stock for the iPhone you pick, from your own browser, and alarms when it's in stock.",
-  "permissions": ["notifications", "storage", "alarms", "tabs", "tts", "power"],
-  "host_permissions": ["https://www.apple.com/*", "https://ntfy.sh/*"],
-  "background": { "service_worker": "background.js" },
-  "icons": { "128": "icon.png" },
-  "action": { "default_title": "iPhone Stock Alert" },
+  "permissions": [
+    "notifications",
+    "storage",
+    "alarms",
+    "tabs",
+    "tts",
+    "power"
+  ],
+  "host_permissions": [
+    "https://www.apple.com/*",
+    "https://ntfy.sh/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "iPhone Stock Alert",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["https://www.apple.com/*shop/buy-iphone/*"],
-      "js": ["parse.js", "content.js"],
+      "matches": [
+        "https://www.apple.com/*shop/buy-iphone/*"
+      ],
+      "js": [
+        "parse.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

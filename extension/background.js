@@ -41,7 +41,7 @@ function nextDelay(fails) {
 function notifyChrome(title, message) {
   chrome.notifications.create('alert-' + Date.now(), {
     type: 'basic',
-    iconUrl: 'icon.png',
+    iconUrl: 'icons/icon128.png',
     title,
     message,
     priority: 2,
