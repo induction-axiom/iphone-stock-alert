@@ -9,7 +9,7 @@ It runs in **your own Chrome tab** on apple.com, the same way you'd check the pa
 ## What you get
 
 - A floating panel on the Apple page: live status, every nearby store, draggable, light/dark, **EN / 中文** switch (English by default)
-- When stock shows up: Mac volume to max + siren + spoken alert + a dialog that stays until you click it, a Chrome notification, and an optional push to your phone
+- When stock shows up: Mac volume to max + a repeating spoken alert + a dialog that stays until you click it, a Chrome notification, and an optional push to your phone
 - A spoken warning if monitoring stops or Apple starts blocking it
 
 ## Setup (5 minutes)

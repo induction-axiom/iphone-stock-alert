@@ -142,7 +142,8 @@ function startSiren() {
     document.title = n++ % 2 ? t('flashA') : t('flashB');
   }, 500);
   const beep = () => {
-    if (!audioCtx || audioCtx.state !== 'running') return;
+    // The Mac helper does the talking; the page only beeps when the helper isn't running.
+    if (view.helperOk !== false || !audioCtx || audioCtx.state !== 'running') return;
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = 'square';

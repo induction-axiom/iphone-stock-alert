@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Duo Watch Mac alarm helper (Python standard library only).
 
-- On /alert from the extension: volume to max, siren + spoken alert on a loop and a dialog,
+- On /alert from the extension: volume to max, a spoken alert on a loop and a dialog,
   until you click the dialog button
 - Keeps the Mac from idle-sleeping while it runs (caffeinate; the display may still sleep)
 - Watchdog: speaks up if the extension goes quiet for 90s, or no check has worked for 5 minutes
@@ -148,13 +148,8 @@ def alarm(title, message, url, lang):
 
     deadline = time.time() + ALARM_MAX_S
     while not stop.is_set() and time.time() < deadline:
-        for _ in range(3):
-            run(["afplay", "/System/Library/Sounds/Sosumi.aiff"])
-        if stop.is_set():
-            break
         speak(text["speak"], lang)
-        if DRY_RUN:
-            stop.wait(2)
+        stop.wait(1.5)
 
     stop.set()
     if old_volume:
