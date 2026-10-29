@@ -17,7 +17,7 @@ On your computer only:
 
 Nothing is synced or sent to the developer.
 
-If Apple keeps blocking checks, the panel offers a **Clear Apple cookies and retry** button. Only when you click it, the extension deletes the apple.com cookies in your browser (as clearing apple.com site data in Chrome settings would, which signs you out of apple.com) and reloads the page. It never reads or sends their contents.
+If Apple keeps blocking checks, the panel offers a **Clear Apple cookies and retry** button. Only when you click it, the extension deletes the apple.com cookies in your browser (as clearing apple.com site data in Chrome settings would, which signs you out of apple.com) and reloads the page. It looks the cookies up only to delete them and never sends them anywhere.
 
 ## What leaves your computer
 
