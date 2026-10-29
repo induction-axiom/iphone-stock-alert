@@ -257,12 +257,13 @@ root.innerHTML = `
     box-shadow: 0 12px 40px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.06);
     font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
     overflow: hidden; transition: box-shadow .2s, border-color .2s;
+    display: flex; flex-direction: column; max-height: calc(100vh - 40px);
   }
   @media (prefers-color-scheme: dark) {
     .card { --bg: rgba(28,28,30,.88); --fg: #f5f5f7; --muted: #a1a1a6; --line: rgba(255,255,255,.1);
             --chip: rgba(255,255,255,.08); --green: #30d158; --red: #ff453a; --amber: #ffb340; --blue: #0a84ff; }
   }
-  .bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 14px; cursor: grab; user-select: none; }
+  .bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 14px; cursor: grab; user-select: none; }
   .bar:active { cursor: grabbing; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
   .title { font-weight: 600; letter-spacing: -.01em; }
@@ -275,7 +276,7 @@ root.innerHTML = `
   .lang { display: flex; padding: 2px; border-radius: 7px; background: var(--chip); }
   .lang button { all: unset; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; }
   .lang button.on { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
-  .body { padding: 0 14px 14px; }
+  .body { padding: 0 14px 14px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
   .collapsed .body { display: none; }
   .headline { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 2px 0 2px; }
   .sub { color: var(--muted); font-size: 12px; }
@@ -499,12 +500,22 @@ async function refreshHelper() {
 const randomTopic = () =>
   'iphone-alert-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => (b % 36).toString(36)).join('');
 
+// Opening Settings or Alerts makes the panel taller; nudge a dragged panel back inside the window.
+function keepInView() {
+  if (host.style.top) {
+    const r = host.getBoundingClientRect();
+    placeAt(r.left, r.top);
+  }
+}
+new ResizeObserver(keepInView).observe(host);
+addEventListener('resize', keepInView);
+
 // Dragging by the title bar; the position is remembered across reloads.
 function placeAt(x, y) {
   const w = host.offsetWidth || 340;
   const h = host.offsetHeight || 60;
-  x = Math.min(Math.max(8, x), innerWidth - w - 8);
-  y = Math.min(Math.max(8, y), innerHeight - h - 8);
+  x = Math.max(8, Math.min(x, innerWidth - w - 8));
+  y = Math.max(8, Math.min(y, innerHeight - h - 8));
   Object.assign(host.style, { left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto' });
   return { x, y };
 }
