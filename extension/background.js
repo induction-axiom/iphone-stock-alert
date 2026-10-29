@@ -105,7 +105,7 @@ async function warnFailing() {
   const text = zh
     ? '库存检查已经五分钟没成功了，可能被 Apple 暂时限制，扩展会自动重试。'
     : "Stock checks haven't worked for 5 minutes. Apple may be blocking them; the extension keeps retrying.";
-  if (channels.chrome) notifyChrome('iPhone Stock Alert', text);
+  if (channels.chrome) notifyChrome('Pickup Alert for iPhone', text);
   if (channels.voice) speak(text, zh, false);
 }
 
@@ -116,7 +116,7 @@ async function reportGap(minutes) {
   const text = zh
     ? `监控暂停了 ${minutes} 分钟（Mac 睡眠或 Chrome 被暂停），现在已恢复。`
     : `Monitoring was paused for ${minutes} min (Mac asleep or Chrome paused). It's running again.`;
-  if (channels.phone && topic) pushPhone(topic, 'iPhone Stock Alert', text, '');
+  if (channels.phone && topic) pushPhone(topic, 'Pickup Alert for iPhone', text, '');
 }
 
 async function reportTabClosed() {
@@ -124,13 +124,13 @@ async function reportTabClosed() {
   const text = zh
     ? '监控已停止：Apple 页面被关掉了。重新打开该页面即可继续。'
     : 'Monitoring stopped: the Apple page was closed. Open it again to resume.';
-  if (channels.chrome) notifyChrome('iPhone Stock Alert', text);
-  if (channels.phone && topic) pushPhone(topic, 'iPhone Stock Alert', text, '');
+  if (channels.chrome) notifyChrome('Pickup Alert for iPhone', text);
+  if (channels.phone && topic) pushPhone(topic, 'Pickup Alert for iPhone', text, '');
 }
 
 async function testChannel(channel) {
   const { zh, topic } = await getPrefs();
-  const title = zh ? 'iPhone 到货提醒测试' : 'iPhone Stock Alert test';
+  const title = zh ? 'iPhone 取货提醒测试' : 'Pickup Alert for iPhone test';
   const message = zh ? '这是一条测试提醒，到货时会是这样。' : 'This is a test. A real alert looks like this.';
   if (channel === 'chrome') {
     notifyChrome(title, message);

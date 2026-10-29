@@ -200,7 +200,7 @@ async function check() {
   try {
     return { ok: true, part, model: name, ...parseAvailability(data, part) };
   } catch (e) {
-    console.warn('[iPhone Stock Alert] raw response', data);
+    console.warn('[Pickup Alert for iPhone] raw response', data);
     return { ok: false, err: e.code === 'apple' ? ['apple', e.message] : ['badShape'] };
   }
 }
@@ -338,7 +338,7 @@ root.innerHTML = `
 </style>
 <div class="card" data-state="idle">
   <div class="bar" data-drag>
-    <span class="dot"></span><span class="title">iPhone Stock Alert</span><span class="mini"></span>
+    <span class="dot"></span><span class="title">Pickup Alert for iPhone</span><span class="mini"></span>
     <span class="grow"></span>
     <div class="lang"><button data-lang="en">EN</button><button data-lang="zh">中</button></div>
     <button class="icon" data-a="collapse">–</button>

@@ -1,20 +1,20 @@
-# <img src="extension/icons/icon128.png" width="36" align="top" alt=""> iPhone Stock Alert
+# <img src="extension/icons/icon128.png" width="36" align="top" alt=""> Pickup Alert for iPhone
 
 Pick the iPhone you want and get alerted the moment it's available for in-store pickup near you.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/on-apple-dark.png">
-  <img src="docs/on-apple-light.png" alt="The iPhone Stock Alert panel on Apple's iPhone Duo buy page, watching nearby stores">
+  <img src="docs/on-apple-light.png" alt="The Pickup Alert for iPhone panel on Apple's iPhone Duo buy page, watching nearby stores">
 </picture>
 
 A small panel sits on Apple's own buy page and checks nearby stores about every 10 seconds, from **your own Chrome tab**, the same way you'd check by hand. It works on any iPhone buy page (iPhone Duo, iPhone 18 Pro, …), in English or 中文.
 
-> Personal tool, not affiliated with Apple. Apple can change or block its stock check at any time.
+> Personal tool, not affiliated with or endorsed by Apple. iPhone is a trademark of Apple Inc. Apple can change or block its stock check at any time.
 
 ## Install
 
-1. Download **[iphone-stock-alert.zip](https://github.com/induction-axiom/iphone-stock-alert/releases/latest/download/iphone-stock-alert.zip)** from the latest release and double-click it to unzip
-2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped `iphone-stock-alert` folder
+1. Download **[pickup-alert-for-iphone.zip](https://github.com/induction-axiom/pickup-alert-for-iphone/releases/latest/download/pickup-alert-for-iphone.zip)** from the latest release and double-click it to unzip
+2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the unzipped `pickup-alert-for-iphone` folder
 3. Open the buy page for your iPhone, for example [iPhone Duo (US)](https://www.apple.com/shop/buy-iphone/iphone-duo) or [iPhone Duo (Canada)](https://www.apple.com/ca/shop/buy-iphone/iphone-duo)
 4. In the panel, pick a model and enter your postal code, tap the alerts you want, then **Start watching**
 
@@ -58,7 +58,7 @@ Tap **Chrome**, **Voice** or **Phone** in the panel to turn each one on or off, 
 |---|---|
 | `HTTP 541` | Nothing. Apple is rate-limiting; checks slow down (up to 5 minutes apart) and recover by themselves. |
 | The model list is empty | Enter the part number by hand (for example `MK1E4LL/A`). |
-| "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[iPhone Stock Alert] raw response`. |
+| "Unrecognized response format" | Apple changed its page. Open DevTools → Console and look for `[Pickup Alert for iPhone] raw response`. |
 | The voice test is silent | Turn the Mac's volume up and Mute off. |
 
 Developers: run tests with `node extension/test.js`; build the release zip with `scripts/package.sh`.
