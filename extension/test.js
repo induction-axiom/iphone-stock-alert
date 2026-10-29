@@ -1,7 +1,7 @@
 // node extension/test.js [path/to/saved-buy-page.html]
 const assert = require('assert');
 const fs = require('fs');
-const { regionPrefix, familySlug, familyName, listModels, colorFromSeo, availabilityUrl, parseAvailability } = require('./parse.js');
+const { regionPrefix, familySlug, familyName, listModels, availabilityUrl, parseAvailability } = require('./parse.js');
 
 assert.strictEqual(regionPrefix('/shop/buy-iphone/iphone-duo'), '');
 assert.strictEqual(regionPrefix('/ca/shop/buy-iphone/iphone-duo'), '/ca');
@@ -19,8 +19,6 @@ const html =
   '{"partNumber":"SHPG3LL/A","name":"AppleCare"}';
 const models = listModels(html);
 assert.deepStrictEqual(models.map((m) => m.part), ['MK1E4LL/A', 'MK1G4LL/A']); // deduped, sorted by size, no AppleCare
-assert.strictEqual(colorFromSeo(models[0]), 'Star White');
-assert.strictEqual(colorFromSeo(models[1]), null);
 
 // node extension/test.js page1.html page2.html ... prints the models each saved buy page offers
 for (const file of process.argv.slice(2)) {
@@ -33,21 +31,20 @@ assert.ok(us.startsWith('/shop/fulfillment-messages?'));
 assert.ok(us.includes('parts.0=MK1E4LL%2FA') && us.includes('location=95014') && us.includes('cppart=UNLOCKED%2FUS'));
 assert.ok(!availabilityUrl('/ca', 'X/A', 'M5V 3L9').includes('cppart'));
 
-// Shape of Apple's fulfillment-messages response as used by the store page in past launches.
+// The parts of Apple's fulfillment-messages response that the extension reads.
 const sample = {
   head: { status: '200', data: {} },
   body: {
     content: {
       pickupMessage: {
-        pickupLocation: 'Cupertino, CA 95014',
         stores: [
           {
-            storeNumber: 'R014', storeName: 'Valley Fair', city: 'Santa Clara', storeDistanceWithUnit: '6.1 mi',
-            partsAvailability: { 'MK1E4LL/A': { pickupDisplay: 'unavailable', pickupSearchQuote: 'Unavailable for Pickup', storePickEligible: true } },
+            storeNumber: 'R014', storeName: 'Valley Fair', storeDistanceWithUnit: '6.1 mi',
+            partsAvailability: { 'MK1E4LL/A': { pickupDisplay: 'unavailable', pickupSearchQuote: 'Unavailable for Pickup'} },
           },
           {
-            storeNumber: 'R033', storeName: 'Stanford', city: 'Palo Alto', storeDistanceWithUnit: '9.0 mi',
-            partsAvailability: { 'MK1E4LL/A': { pickupDisplay: 'available', pickupSearchQuote: 'Available Today', storePickEligible: true } },
+            storeNumber: 'R033', storeName: 'Stanford', storeDistanceWithUnit: '9.0 mi',
+            partsAvailability: { 'MK1E4LL/A': { pickupDisplay: 'available', pickupSearchQuote: 'Available Today'} },
           },
           { storeNumber: 'R999', storeName: 'No Data' },
         ],
@@ -57,7 +54,6 @@ const sample = {
   },
 };
 const r = parseAvailability(sample, 'MK1E4LL/A');
-assert.strictEqual(r.location, 'Cupertino, CA 95014');
 assert.deepStrictEqual(r.stores.map((s) => s.available), [false, true, false]);
 assert.strictEqual(r.stores[1].quote, 'Available Today');
 assert.strictEqual(r.delivery, 'Delivers Nov 18 – Nov 25');

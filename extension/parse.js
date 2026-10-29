@@ -24,7 +24,7 @@
 
   // Every phone model in the buy page's embedded JSON, keyed on Apple's dimension values, which
   // are the same in every country and language: {part, capacity: "256gb", color: "starwhite",
-  // screen: "6_9inch" or "", seo: "...-256gb-star-white-..."}.
+  // screen: "6_9inch" or ""}.
   function listModels(html) {
     const seen = new Map();
     for (const chunk of html.split('{"partNumber":"').slice(1)) {
@@ -37,18 +37,11 @@
       const capacity = get('dimensionCapacity');
       const color = get('dimensionColor');
       if (!capacity || !color) continue;
-      seen.set(part, { part, capacity, color, screen: get('dimensionScreensize'), seo: get('seoUrlToken') });
+      seen.set(part, { part, capacity, color, screen: get('dimensionScreensize') });
     }
     return [...seen.values()].sort(
       (a, b) => a.screen.localeCompare(b.screen) || a.color.localeCompare(b.color) || capacityGb(a.capacity) - capacityGb(b.capacity)
     );
-  }
-
-  // "Star White" for color "starwhite", read from an seoUrlToken like "...-256gb-star-white-att".
-  function colorFromSeo(model) {
-    const m = model.seo.match(new RegExp(model.capacity + '-([a-z-]+?)(?:-(?:att|t-mobile|verizon|unlocked|sprint))?$'));
-    if (!m || m[1].replace(/-/g, '') !== model.color) return null;
-    return m[1].split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
   }
 
   function availabilityUrl(prefix, part, postal) {
@@ -77,32 +70,23 @@
 
     const stores = (pm.stores || []).map((s) => {
       const pa = (s.partsAvailability || {})[part] || {};
-      const mt = (pa.messageTypes && (pa.messageTypes.regular || pa.messageTypes.compact)) || {};
-      const quote = pa.pickupSearchQuote || mt.storePickupQuote || '';
       return {
-        id: s.storeNumber || s.storeName,
-        name: s.storeName || s.storeNumber || '?',
-        city: s.city || '',
+        id: s.storeNumber,
+        name: s.storeName,
         distance: s.storeDistanceWithUnit || '',
         display: pa.pickupDisplay || 'unknown',
-        available: pa.pickupDisplay === 'available' || (pa.storePickEligible === true && /^available/i.test(quote)),
-        quote: quote,
+        available: pa.pickupDisplay === 'available',
+        quote: pa.pickupSearchQuote || '',
       };
     });
 
-    const dm = content.deliveryMessage && content.deliveryMessage[part];
-    const reg = dm && (dm.regular || dm.compact);
-    let delivery = '';
-    if (reg && reg.deliveryOptionMessages) {
-      delivery = reg.deliveryOptionMessages.map((o) => o.displayName).filter(Boolean).join(' / ');
-    } else if (reg && reg.deliveryOptions) {
-      delivery = reg.deliveryOptions.map((o) => o.date || o.displayName).filter(Boolean).join(' / ');
-    }
+    const reg = content.deliveryMessage && content.deliveryMessage[part] && content.deliveryMessage[part].regular;
+    const delivery = reg && reg.deliveryOptionMessages ? reg.deliveryOptionMessages.map((o) => o.displayName).join(' / ') : '';
 
-    return { location: pm.pickupLocation || '', stores, delivery };
+    return { stores, delivery };
   }
 
-  const api = { regionPrefix, familySlug, familyName, listModels, colorFromSeo, availabilityUrl, parseAvailability };
+  const api = { regionPrefix, familySlug, familyName, listModels, availabilityUrl, parseAvailability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.StockParse = api;
 })(this);

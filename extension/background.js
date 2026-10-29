@@ -16,10 +16,6 @@ const VOICE_MAX_MS = 15 * 60_000;
 const WARN_EVERY_MS = 60 * 60_000; // problem warnings: at most one an hour per tab
 const DEFAULT_CHANNELS = { chrome: true, voice: true, phone: false };
 
-// Only the last postal code and the phone topic are kept across tabs; earlier versions kept more.
-chrome.storage.local.remove(['running', 'tabId', 'fails', 'failingSince', 'lastReloadAt', 'alerted', 'nextAt', 'lastGap',
-  'target', 'manualPart', 'lang', 'channels', 'panelPos', 'collapsed']);
-
 // Language and alert choices belong to the tab (sent by its panel); the phone topic is shared.
 async function getPrefs(w) {
   const { ntfyTopic } = await chrome.storage.local.get('ntfyTopic');
